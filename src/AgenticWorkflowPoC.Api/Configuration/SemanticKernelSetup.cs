@@ -15,15 +15,9 @@ namespace AgenticWorkflowPoC.Api.Configuration
             services.AddScoped<IHitlState, HitlStateService>();
             services.AddTransient<StaffOverridesPlugin>();
 
-            // 2. Register the local Ollama chat completion service used by Semantic Kernel.
-            services.AddSingleton<IAutoFunctionInvocationFilter, HitlTerminationFilter>();
-
             services.AddSingleton<Kernel>(sp =>
             {
                 var builder = Kernel.CreateBuilder();
-
-                builder.Services.AddSingleton<IAutoFunctionInvocationFilter, HitlTerminationFilter>();
-
                 builder.AddOllamaChatCompletion(
                     modelId: modelId,
                     endpoint: new Uri(endpoint));

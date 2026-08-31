@@ -20,3 +20,4 @@ C:/Users/maldonem/ai-research/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Core/obj
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Core/obj/Debug/net9.0/refint/AgenticWorkflowPoC.Core.dll
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Core/obj/Debug/net9.0/AgenticWorkflowPoC.Core.pdb
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Core/obj/Debug/net9.0/ref/AgenticWorkflowPoC.Core.dll
+/home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Core/obj/Debug/net9.0/AgenticWorkflowPoC.Core.sourcelink.json

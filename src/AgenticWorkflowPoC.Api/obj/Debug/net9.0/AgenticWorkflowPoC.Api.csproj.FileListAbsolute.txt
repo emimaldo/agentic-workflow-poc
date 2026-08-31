@@ -231,3 +231,4 @@ C:/Users/maldonem/ai-research/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Api/obj/
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Api/bin/Debug/net9.0/Microsoft.AspNetCore.Mvc.NewtonsoftJson.dll
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Api/bin/Debug/net9.0/Newtonsoft.Json.dll
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Api/bin/Debug/net9.0/Newtonsoft.Json.Bson.dll
+/home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Api/obj/Debug/net9.0/AgenticWorkflowPoC.Api.sourcelink.json

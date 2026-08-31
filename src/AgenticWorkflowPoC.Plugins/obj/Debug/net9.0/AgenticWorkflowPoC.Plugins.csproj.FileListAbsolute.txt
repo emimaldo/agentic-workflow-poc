@@ -28,3 +28,4 @@ C:/Users/maldonem/ai-research/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Plugins/
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Plugins/obj/Debug/net9.0/refint/AgenticWorkflowPoC.Plugins.dll
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Plugins/obj/Debug/net9.0/AgenticWorkflowPoC.Plugins.pdb
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Plugins/obj/Debug/net9.0/ref/AgenticWorkflowPoC.Plugins.dll
+/home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Plugins/obj/Debug/net9.0/AgenticWorkflowPoC.Plugins.sourcelink.json

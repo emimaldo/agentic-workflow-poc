@@ -678,3 +678,4 @@ C:/Users/maldonem/ai-research/AgenticWorkflowPoC/tests/AgenticWorkflowPoC.Tests/
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/tests/AgenticWorkflowPoC.Tests/bin/Debug/net9.0/Microsoft.AspNetCore.JsonPatch.dll
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/tests/AgenticWorkflowPoC.Tests/bin/Debug/net9.0/Microsoft.AspNetCore.Mvc.NewtonsoftJson.dll
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/tests/AgenticWorkflowPoC.Tests/bin/Debug/net9.0/Newtonsoft.Json.Bson.dll
+/home/emimaldo/Projects/AI/AgenticWorkflowPoC/tests/AgenticWorkflowPoC.Tests/obj/Debug/net9.0/AgenticWorkflowPoC.Tests.sourcelink.json

@@ -28,3 +28,4 @@ C:/Users/maldonem/ai-research/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Infrastr
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Infrastructure/obj/Debug/net9.0/refint/AgenticWorkflowPoC.Infrastructure.dll
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Infrastructure/obj/Debug/net9.0/AgenticWorkflowPoC.Infrastructure.pdb
 /home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Infrastructure/obj/Debug/net9.0/ref/AgenticWorkflowPoC.Infrastructure.dll
+/home/emimaldo/Projects/AI/AgenticWorkflowPoC/src/AgenticWorkflowPoC.Infrastructure/obj/Debug/net9.0/AgenticWorkflowPoC.Infrastructure.sourcelink.json

@@ -87,7 +87,7 @@ namespace AgenticWorkflowPoC.Api.Controllers
                 var pluginResult = await plugin.OverrideAvailabilityAsync( staffId, date );
                 _logger.LogInformation("Plugin result: {PluginResult}", pluginResult);
 
-                if( pluginResult != null && pluginResult.Contains( "SYSTEM INSTRUCTION: STOP" ) )
+                if( _hitlState.IsSuspended )
                 {
                     _logger.LogWarning("Operation suspended for SessionId={SessionId}: {Reason}", request.SessionId, _hitlState.Reason);
                     return Accepted( new AgentResponse( "Suspended", _hitlState.Reason, request.SessionId ) );
