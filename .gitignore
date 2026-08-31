@@ -1,0 +1,9 @@
+# Ignore development appsettings with local secrets
+src/AgenticWorkflowPoC.Api/appsettings.Development.json
+
+# Build outputs
+**/bin/
+**/obj/
+
+# User-specific files
+.vs/
