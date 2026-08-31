@@ -1,82 +1,111 @@
-﻿# AgenticWorkflowPoC
+# AgenticWorkflowPoC
 
-Pequeño Proof-of-Concept que demuestra un flujo agente-determinista para operaciones internas.
+Última actualización: 2026-08-31
 
-Características principales
-- API ASP.NET Core (net9.0) que orquesta llamadas a un LLM local (Ollama) vía Semantic Kernel.
-- Enfoque determinista: el modelo devuelve solo JSON; el `AgentController` parsea el JSON y llama a plugins (no invocación automática de funciones).
-- `IHitlState` request-scoped para manejar interacciones humano-en-el-bucle (HITL) sin estado global.
-- Tests: unitarios y E2E usando `WebApplicationFactory` con un fake de `IChatCompletionService`.
+Descripción
+-----------
+AgenticWorkflowPoC es un proof-of-concept que muestra un patrón seguro y determinista para integrar LLMs en flujos de negocio. En lugar de permitir que el modelo invoque herramientas directamente, el LLM devuelve un JSON estructurado y el servidor —de forma determinista— decide qué `plugin` ejecutar.
 
-Estructura
-- `src/AgenticWorkflowPoC.Api` — API web y configuración del Kernel.
-- `src/AgenticWorkflowPoC.Plugins` — plugins (ej. `StaffOverridesPlugin`) y `IHitlState`.
+Principales objetivos
+- Evitar la invocación automática de funciones por parte del LLM (reducir al máximo las alucinaciones).
+- Mantener el estado de HITL (Human-in-the-Loop) por petición mediante `IHitlState` (scoped DI).
+- Proveer tests unitarios y E2E que no dependan de servicios externos (E2E usa un fake de `IChatCompletionService`).
+
+Estructura del repositorio
+- `src/AgenticWorkflowPoC.Api` — API web, configuración y controladores.
+- `src/AgenticWorkflowPoC.Plugins` — plugins y `IHitlState` (implementación scoped).
 - `src/AgenticWorkflowPoC.Core` — entidades e interfaces.
 - `src/AgenticWorkflowPoC.Infrastructure` — persistencia (esqueleto SQL).
-- `tests/AgenticWorkflowPoC.Tests` — tests unitarios e integración.
+- `tests/AgenticWorkflowPoC.Tests` — pruebas unitarias e integración.
 
 Requisitos
 - .NET 9 SDK
-- (Opcional) Ollama local en `http://localhost:11434` con un modelo compatible (ej. `llama3.1`) si querés probar la integración real.
+- (Opcional) Ollama local en `http://localhost:11434` con un modelo compatible (ej. `llama3.1`) para pruebas integradas reales.
 
-Comandos rápidos
+Quickstart (local)
+------------------
+1. Restaurar dependencias y ejecutar tests:
 
-Ejecutar tests:
 ```bash
+dotnet restore
 dotnet test AgenticWorkflowPoC.sln
 ```
 
-Levantar la API localmente:
+2. Ejecutar la API localmente:
+
 ```bash
 dotnet run --project src/AgenticWorkflowPoC.Api
 ```
 
-Usar Docker (solo SQL):
+Por defecto la app expone endpoints en `http://localhost:5000` (o `https://localhost:5001` si está configurado). Si usás Ollama local, confirma `Ollama:Endpoint` y `Ollama:Model` en `appsettings.json` o variables de entorno.
+
+Ejemplos de uso
+---------------
+
+Invoke (flujo principal):
+
 ```bash
-docker compose up -d
+curl -s -X POST http://localhost:5000/api/agent/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId":"s1","prompt":"Change EMP-REQ-001 availability to 2026-09-01T09:00:00Z"}'
 ```
 
-Notas de diseño
-- Deterministic router: el controlador exige que el LLM responda únicamente con JSON estructurado, evita que el modelo halucine acciones.
-- `IHitlState` es `Scoped` y se inyecta en plugins para mantener el estado por petición.
+Respuesta (ejemplo de suspensión por conflicto):
 
-Cómo contribuir
-- Ver [CONTRIBUTING.md](CONTRIBUTING.md) para proceso de PR, pruebas y estilo.
+```json
+{
+  "status": "Suspended",
+  "message": "A shift conflict was detected for staff EMP-REQ-001.",
+  "sessionId": "s1"
+}
+```
+
+Resume (after human decision):
+
+```bash
+curl -s -X POST http://localhost:5000/api/agent/resume/s1 \
+  -H "Content-Type: application/json" \
+  -d '{"isApproved":true}'
+```
+
+Diseño técnico (resumen)
+------------------------
+- Deterministic Router: el LLM debe devolver únicamente JSON con la estructura esperada. El controlador valida el JSON y decide qué plugin invocar.
+- `IHitlState` (scoped): mantiene la marca `IsSuspended` y la `Reason` por petición; inyectado en plugins.
+- Plugins: clases C# (ej. `StaffOverridesPlugin`) que realizan comprobaciones de negocio y devuelven resultados deterministas.
+
+Diagrama simplificado
+
+```mermaid
+flowchart LR
+  U[User] -->|prompt| API[AgentController]
+  API -->|builds chat| K[Semantic Kernel]
+  K -->|returns JSON| API
+  API -->|parse| Router[Deterministic Router]
+  Router --> P[StaffOverridesPlugin]
+  P -->|may set| HITL[IHitlState]
+  HITL --> API
+  API -->|response| U
+```
+
+Tests
+-----
+- Unitarios: validar lógica de plugins y controlador sin levantar la app.
+- E2E: `WebApplicationFactory` con reemplazo de `IChatCompletionService` por un fake determinista.
+
+Buenas prácticas / notas
+-----------------------
+- Para CI, los tests no necesitan Ollama ni OpenAI: los fakes proporcionan determinismo.
+- Si querés usar un proveedor real, verificá límites y costos del proveedor (no incluidos en este PoC).
+
+Contribuir
+----------
+- Seguí las pautas en `CONTRIBUTING.md`.
 
 Licencia
-- Este repositorio es un PoC; añadí licencia si querés publicar (no se incluye licencia por defecto).
-# 🤖 Agentic Workflow POC: Deterministic AI with Human-in-the-Loop
+--------
+- Añadí un `LICENSE` si vas a publicar este repositorio públicamente.
 
-This repository demonstrates a **Production-Ready Agentic Architecture** using .NET 8, Microsoft Semantic Kernel, and SQL Server. 
-
-Unlike standard "chatbot" implementations, this architecture treats the Large Language Model (LLM) as an orchestrator for deterministic C# code. It showcases strict boundary enforcement, separation of concerns (Clean Architecture), and the **Human-in-the-Loop (HITL)** pattern for safely executing sensitive business mutations.
-
-## 🏗️ Architecture Overview
-
-The solution follows Clean Architecture principles to isolate the AI orchestrator from the underlying domain and infrastructure:
-
-*   **`Core`**: Contains POCO entities (`AgentSession`) and Repository Interfaces. No dependencies on AI frameworks or databases.
-*   **`Plugins`**: The application layer. Contains standard C# classes decorated with `[KernelFunction]`. These are the "tools" the agent uses to evaluate business rules (e.g., `StaffOverridesPlugin`).
-*   **`Infrastructure`**: Highly optimized data access using **Dapper** and SQL Server to serialize and persist the state of the agent.
-*   **`Api`**: The entry point. Manages the HTTP lifecycle, Dependency Injection, and hosts the Semantic Kernel orchestrator.
-
-## ⏸️ The Human-in-the-Loop (HITL) Pattern
-
-One of the biggest risks of Agentic AI is allowing models to execute destructive operations autonomously. This POC implements a state-machine suspension pattern:
-
-1. **Invoke:** The LLM intends to mutate state (e.g., override a staff schedule).
-2. **Evaluate:** The native C# Plugin executes strict business rules. If a conflict is detected, it returns a `HITL_PAUSE` signal instead of executing the action.
-3. **Suspend:** The API Controller intercepts the signal, serializes the `ChatHistory` (the agent's brain), saves it to SQL Server via Dapper, and returns an HTTP 202 Accepted.
-4. **Resume:** A human administrator reviews the conflict. A `/resume` endpoint is called with the decision, the memory is rehydrated from SQL, and the agent completes the transaction.
-
-## 🚀 Getting Started
-
-### 1. Prerequisites
-* [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-* Docker Desktop
-* An OpenAI API Key
-
-### 2. Infrastructure Setup
-Run the included docker-compose file to spin up SQL Server 2022:
-```bash
-docker-compose up -d
+Contacto
+-------
+- Abrí Issues o PRs en https://github.com/emimaldo/agentic-workflow-poc
