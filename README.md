@@ -1,48 +1,51 @@
 # AgenticWorkflowPoC
 
-Última actualización: 2026-08-31
+Last updated: 2026-08-31
 
-Descripción
+Description
 -----------
-AgenticWorkflowPoC es un proof-of-concept que muestra un patrón seguro y determinista para integrar LLMs en flujos de negocio. En lugar de permitir que el modelo invoque herramientas directamente, el LLM devuelve un JSON estructurado y el servidor —de forma determinista— decide qué `plugin` ejecutar.
+AgenticWorkflowPoC is a proof-of-concept demonstrating a safe, deterministic pattern for integrating LLMs into business flows. Instead of allowing the model to directly invoke tools, the LLM returns structured JSON and the server deterministically decides which plugin to execute.
 
-Principales objetivos
-- Evitar la invocación automática de funciones por parte del LLM (reducir al máximo las alucinaciones).
-- Mantener el estado de HITL (Human-in-the-Loop) por petición mediante `IHitlState` (scoped DI).
-- Proveer tests unitarios y E2E que no dependan de servicios externos (E2E usa un fake de `IChatCompletionService`).
+Goals
+-----
+- Prevent the LLM from autonomously invoking functions (reduce hallucinations).
+- Keep Human-in-the-Loop (HITL) state per-request via `IHitlState` (scoped DI).
+- Provide unit and E2E tests that do not require external services (E2E uses a fake `IChatCompletionService`).
 
-Estructura del repositorio
-- `src/AgenticWorkflowPoC.Api` — API web, configuración y controladores.
-- `src/AgenticWorkflowPoC.Plugins` — plugins y `IHitlState` (implementación scoped).
-- `src/AgenticWorkflowPoC.Core` — entidades e interfaces.
-- `src/AgenticWorkflowPoC.Infrastructure` — persistencia (esqueleto SQL).
-- `tests/AgenticWorkflowPoC.Tests` — pruebas unitarias e integración.
+Repository structure
+--------------------
+- `src/AgenticWorkflowPoC.Api` — API, controllers and Kernel setup.
+- `src/AgenticWorkflowPoC.Plugins` — plugins and `IHitlState` (scoped implementation).
+- `src/AgenticWorkflowPoC.Core` — entities and interfaces.
+- `src/AgenticWorkflowPoC.Infrastructure` — persistence (SQL skeleton).
+- `tests/AgenticWorkflowPoC.Tests` — unit and integration tests.
 
-Requisitos
+Requirements
+------------
 - .NET 9 SDK
-- (Opcional) Ollama local en `http://localhost:11434` con un modelo compatible (ej. `llama3.1`) para pruebas integradas reales.
+- (Optional) Local Ollama at `http://localhost:11434` with a compatible model (e.g. `llama3.1`) for real integrated runs.
 
 Quickstart (local)
 ------------------
-1. Restaurar dependencias y ejecutar tests:
+1. Restore dependencies and run tests:
 
 ```bash
 dotnet restore
 dotnet test AgenticWorkflowPoC.sln
 ```
 
-2. Ejecutar la API localmente:
+2. Run the API locally:
 
 ```bash
 dotnet run --project src/AgenticWorkflowPoC.Api
 ```
 
-Por defecto la app expone endpoints en `http://localhost:5000` (o `https://localhost:5001` si está configurado). Si usás Ollama local, confirma `Ollama:Endpoint` y `Ollama:Model` en `appsettings.json` o variables de entorno.
+By default the app listens on `http://localhost:5000` (and `https://localhost:5001` if configured). If using Ollama, verify `Ollama:Endpoint` and `Ollama:Model` in `appsettings.json` or environment variables.
 
-Ejemplos de uso
----------------
+Example requests
+----------------
 
-Invoke (flujo principal):
+Invoke (main flow):
 
 ```bash
 curl -s -X POST http://localhost:5000/api/agent/invoke \
@@ -50,7 +53,7 @@ curl -s -X POST http://localhost:5000/api/agent/invoke \
   -d '{"sessionId":"s1","prompt":"Change EMP-REQ-001 availability to 2026-09-01T09:00:00Z"}'
 ```
 
-Respuesta (ejemplo de suspensión por conflicto):
+Example response (suspended due to conflict):
 
 ```json
 {
@@ -68,44 +71,54 @@ curl -s -X POST http://localhost:5000/api/agent/resume/s1 \
   -d '{"isApproved":true}'
 ```
 
-Diseño técnico (resumen)
-------------------------
-- Deterministic Router: el LLM debe devolver únicamente JSON con la estructura esperada. El controlador valida el JSON y decide qué plugin invocar.
-- `IHitlState` (scoped): mantiene la marca `IsSuspended` y la `Reason` por petición; inyectado en plugins.
-- Plugins: clases C# (ej. `StaffOverridesPlugin`) que realizan comprobaciones de negocio y devuelven resultados deterministas.
+Design notes
+------------
+- Deterministic Router: the LLM must return only the expected JSON structure. The controller validates and determines which plugin to invoke.
+- `IHitlState` is registered as `Scoped` and carries `IsSuspended` and `Reason` for the request; injected into plugins.
+- Plugins are plain C# classes (e.g. `StaffOverridesPlugin`) that implement business rules and return deterministic results.
 
-Diagrama simplificado
+Simplified flow (Mermaid)
 
 ```mermaid
 flowchart LR
-  U[User] -->|prompt| API[AgentController]
-  API -->|builds chat| K[Semantic Kernel]
-  K -->|returns JSON| API
+  User -->|prompt| API[AgentController]
+  API -->|builds chat| Kernel[Semantic Kernel]
+  Kernel -->|returns JSON| API
   API -->|parse| Router[Deterministic Router]
-  Router --> P[StaffOverridesPlugin]
-  P -->|may set| HITL[IHitlState]
+  Router --> Plugin[StaffOverridesPlugin]
+  Plugin -->|may set| HITL[IHitlState]
   HITL --> API
-  API -->|response| U
+  API -->|response| User
 ```
 
-Tests
+Basic test flow (CI-friendly)
+---------------------------
+1. Restore and run the test suite locally:
+
+```bash
+dotnet restore
+dotnet test AgenticWorkflowPoC.sln --no-build
+```
+
+2. To run only tests in the test project:
+
+```bash
+dotnet test tests/AgenticWorkflowPoC.Tests --filter FullyQualifiedName~AgentController
+```
+
+Notes
 -----
-- Unitarios: validar lógica de plugins y controlador sin levantar la app.
-- E2E: `WebApplicationFactory` con reemplazo de `IChatCompletionService` por un fake determinista.
+- E2E tests are deterministic: they replace `IChatCompletionService` with a fake implementation so CI doesn't require a running LLM.
+- If you plan to run the API against a real LLM, be mindful of rate limits and credentials.
 
-Buenas prácticas / notas
------------------------
-- Para CI, los tests no necesitan Ollama ni OpenAI: los fakes proporcionan determinismo.
-- Si querés usar un proveedor real, verificá límites y costos del proveedor (no incluidos en este PoC).
+Contributing
+------------
+See `CONTRIBUTING.md` for PR and code-style guidance.
 
-Contribuir
-----------
-- Seguí las pautas en `CONTRIBUTING.md`.
-
-Licencia
---------
-- Añadí un `LICENSE` si vas a publicar este repositorio públicamente.
-
-Contacto
+License
 -------
-- Abrí Issues o PRs en https://github.com/emimaldo/agentic-workflow-poc
+Add a `LICENSE` file if you want to publish this repository.
+
+Contact
+-------
+Open issues or PRs at https://github.com/emimaldo/agentic-workflow-poc
