@@ -1,4 +1,51 @@
-﻿# 🤖 Agentic Workflow POC: Deterministic AI with Human-in-the-Loop
+﻿# AgenticWorkflowPoC
+
+Pequeño Proof-of-Concept que demuestra un flujo agente-determinista para operaciones internas.
+
+Características principales
+- API ASP.NET Core (net9.0) que orquesta llamadas a un LLM local (Ollama) vía Semantic Kernel.
+- Enfoque determinista: el modelo devuelve solo JSON; el `AgentController` parsea el JSON y llama a plugins (no invocación automática de funciones).
+- `IHitlState` request-scoped para manejar interacciones humano-en-el-bucle (HITL) sin estado global.
+- Tests: unitarios y E2E usando `WebApplicationFactory` con un fake de `IChatCompletionService`.
+
+Estructura
+- `src/AgenticWorkflowPoC.Api` — API web y configuración del Kernel.
+- `src/AgenticWorkflowPoC.Plugins` — plugins (ej. `StaffOverridesPlugin`) y `IHitlState`.
+- `src/AgenticWorkflowPoC.Core` — entidades e interfaces.
+- `src/AgenticWorkflowPoC.Infrastructure` — persistencia (esqueleto SQL).
+- `tests/AgenticWorkflowPoC.Tests` — tests unitarios e integración.
+
+Requisitos
+- .NET 9 SDK
+- (Opcional) Ollama local en `http://localhost:11434` con un modelo compatible (ej. `llama3.1`) si querés probar la integración real.
+
+Comandos rápidos
+
+Ejecutar tests:
+```bash
+dotnet test AgenticWorkflowPoC.sln
+```
+
+Levantar la API localmente:
+```bash
+dotnet run --project src/AgenticWorkflowPoC.Api
+```
+
+Usar Docker (solo SQL):
+```bash
+docker compose up -d
+```
+
+Notas de diseño
+- Deterministic router: el controlador exige que el LLM responda únicamente con JSON estructurado, evita que el modelo halucine acciones.
+- `IHitlState` es `Scoped` y se inyecta en plugins para mantener el estado por petición.
+
+Cómo contribuir
+- Ver [CONTRIBUTING.md](CONTRIBUTING.md) para proceso de PR, pruebas y estilo.
+
+Licencia
+- Este repositorio es un PoC; añadí licencia si querés publicar (no se incluye licencia por defecto).
+# 🤖 Agentic Workflow POC: Deterministic AI with Human-in-the-Loop
 
 This repository demonstrates a **Production-Ready Agentic Architecture** using .NET 8, Microsoft Semantic Kernel, and SQL Server. 
 
