@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Suppress analyzer warning caused by OllamaSharp source generators referencing newer compiler -->
+    <NoWarn>$(NoWarn);9057</NoWarn>
+  </PropertyGroup>
+</Project>

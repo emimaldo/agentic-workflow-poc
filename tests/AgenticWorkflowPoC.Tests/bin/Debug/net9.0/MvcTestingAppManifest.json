@@ -1,0 +1,6 @@
+{
+  "AgenticWorkflowPoC.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "\/home\/emimaldo\/Projects\/AI\/AgenticWorkflowPoC\/src\/AgenticWorkflowPoC.Api",
+  "AgenticWorkflowPoC.Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "\/home\/emimaldo\/Projects\/AI\/AgenticWorkflowPoC\/src\/AgenticWorkflowPoC.Core",
+  "AgenticWorkflowPoC.Infrastructure, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "\/home\/emimaldo\/Projects\/AI\/AgenticWorkflowPoC\/src\/AgenticWorkflowPoC.Infrastructure",
+  "AgenticWorkflowPoC.Plugins, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "\/home\/emimaldo\/Projects\/AI\/AgenticWorkflowPoC\/src\/AgenticWorkflowPoC.Plugins"
+}
