@@ -87,7 +87,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var content = new Microsoft.SemanticKernel.ChatMessageContent();
 
-            if (!string.IsNullOrEmpty(_resumeContent) && chatHistory.Messages.Count == 1 && chatHistory.Messages[0].Role == Microsoft.SemanticKernel.ChatMessageRole.System)
+            if (!string.IsNullOrEmpty(_resumeContent))
             {
                 content.Content = _resumeContent;
             }

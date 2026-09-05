@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
+using AgenticWorkflowPoC.Api.Services;
 using Xunit;
 
 namespace AgenticWorkflowPoC.Tests.Controllers
@@ -24,19 +25,22 @@ namespace AgenticWorkflowPoC.Tests.Controllers
             var hitl = new HitlStateService();
             var fakeChat = new FakeChatCompletionService(returnConflict: true);
 
-            var controller = new AgentController(fakeChat, hitl, NullLogger<AgentController>.Instance);
-
-            // Prepare RequestServices so controller can resolve the plugin with the same hitl instance
+            // Build minimal AgentService and pass it to controller
             var services = new ServiceCollection();
             services.AddSingleton<StaffOverridesPlugin>(sp => new StaffOverridesPlugin(NullLogger<StaffOverridesPlugin>.Instance, hitl));
             var provider = services.BuildServiceProvider();
+
+            var validator = new ExtractionValidator();
+            var agentService = new AgenticWorkflowPoC.Api.Services.AgentService(fakeChat, hitl, NullLogger<AgenticWorkflowPoC.Api.Services.AgentService>.Instance, provider, validator);
+
+            var controller = new AgentController(agentService, NullLogger<AgentController>.Instance);
 
             controller.ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext { RequestServices = provider }
             };
 
-            var req = new AgentController.AgentRequest("s1", "Please change EMP-REQ-001 availability to 2026-09-01T09:00:00Z");
+            var req = new AgenticWorkflowPoC.Api.Models.AgentRequest("s1", "Please change EMP-REQ-001 availability to 2026-09-01T09:00:00Z");
 
             // Act
             var result = await controller.InvokeAgent(req);
