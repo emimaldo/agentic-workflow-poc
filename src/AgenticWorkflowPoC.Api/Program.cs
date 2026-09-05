@@ -19,6 +19,15 @@ string endpoint = builder.Configuration["Ollama:Endpoint"] ?? "http://localhost:
 
 builder.Services.AddAgenticWorkflow( modelId, endpoint );
 
+// Development override: when USE_FAKE_CHAT=true the app will register a deterministic fake
+// IChatCompletionService so local runs and curl tests work without Ollama.
+if (builder.Configuration["USE_FAKE_CHAT"] == "true")
+{
+    var returnConflict = builder.Configuration["FAKE_RETURN_CONFLICT"] != "false";
+    builder.Services.AddSingleton<Microsoft.SemanticKernel.ChatCompletion.IChatCompletionService>(
+        new AgenticWorkflowPoC.Api.Development.FakeChatCompletionService(returnConflict));
+}
+
 var app = builder.Build();
 
 if( app.Environment.IsDevelopment() )
