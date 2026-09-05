@@ -4,6 +4,7 @@ using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Connectors.Ollama;
 using AgenticWorkflowPoC.Plugins;
 using AgenticWorkflowPoC.Plugins.Operations;
+using AgenticWorkflowPoC.Api.Services;
 
 namespace AgenticWorkflowPoC.Api.Configuration
 {
@@ -29,6 +30,10 @@ namespace AgenticWorkflowPoC.Api.Configuration
 
             // Expose the kernel's IChatCompletionService through DI so controllers can inject/mock it in tests.
             services.AddSingleton(sp => sp.GetRequiredService<Kernel>().GetRequiredService<Microsoft.SemanticKernel.ChatCompletion.IChatCompletionService>());
+
+            // Application services
+            services.AddTransient<IAgentService, AgentService>();
+            services.AddSingleton<IExtractionValidator, ExtractionValidator>();
 
             return services;
         }

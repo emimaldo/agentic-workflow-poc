@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AgenticWorkflowPoC.Core")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f74ccc3e285f13f895a70388590dd391a78c5afa")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+9d3b102ffe7619f97b4c79ff417ecfde45207e3c")]
 [assembly: System.Reflection.AssemblyProductAttribute("AgenticWorkflowPoC.Core")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AgenticWorkflowPoC.Core")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

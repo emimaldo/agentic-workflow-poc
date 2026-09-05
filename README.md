@@ -122,3 +122,21 @@ Add a `LICENSE` file if you want to publish this repository.
 Contact
 -------
 Open issues or PRs at https://github.com/emimaldo/agentic-workflow-poc
+
+Important notes (2026-09-05)
+-----------------------------
+- The controller logic was refactored into `IAgentService` / `AgentService` to enforce SRP. Business logic and JSON parsing now live in `src/AgenticWorkflowPoC.Api/Services`.
+- The model extraction prompt is centralized in `AgentDefaults.ExtractionPrompt`.
+- The repository history was rewritten to remove accidentally committed secrets. If you cloned before 2026-09-05, please re-clone:
+
+```bash
+rm -rf agentic-workflow-poc
+git clone https://github.com/emimaldo/agentic-workflow-poc.git
+```
+
+Run the full test suite after cloning:
+
+```bash
+dotnet restore
+dotnet test AgenticWorkflowPoC.sln
+```
