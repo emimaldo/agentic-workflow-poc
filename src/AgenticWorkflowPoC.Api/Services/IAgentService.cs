@@ -1,11 +1,13 @@
 using System.Threading.Tasks;
+using System;
+using System.Threading;
 using AgenticWorkflowPoC.Api.Models;
 
 namespace AgenticWorkflowPoC.Api.Services
 {
     public interface IAgentService
     {
-        Task<AgentResponse> InvokeAsync(string sessionId, string prompt);
-        Task<AgentResponse> ResumeAsync(string sessionId, bool isApproved);
+        Task<AgentResponse> InvokeAsync(Guid sessionId, string prompt, CancellationToken cancellationToken = default);
+        Task<AgentResponse> ResumeAsync(Guid sessionId, bool isApproved, CancellationToken cancellationToken = default);
     }
 }

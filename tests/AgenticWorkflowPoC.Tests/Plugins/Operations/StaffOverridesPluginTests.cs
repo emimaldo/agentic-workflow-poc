@@ -1,4 +1,5 @@
 ﻿using System.Threading.Tasks;
+using System;
 using AgenticWorkflowPoC.Plugins;
 using AgenticWorkflowPoC.Plugins.Operations;
 using Xunit;
@@ -19,14 +20,14 @@ namespace AgenticWorkflowPoC.Tests.Plugins.Operations
             var hitl = new HitlStateService();
             var plugin = new StaffOverridesPlugin(Microsoft.Extensions.Logging.Abstractions.NullLogger<StaffOverridesPlugin>.Instance, hitl);
             string staffId = "EMP-102"; // Regular ID, no conflict
-            string newAvailability = "2026-09-01T09:00:00Z";
+            var newAvailability = DateTimeOffset.Parse("2026-09-01T09:00:00Z");
 
             // Act
             var result = await plugin.OverrideAvailabilityAsync( staffId, newAvailability );
 
             // Assert
-            Assert.Contains( "SUCCESS", result );
-            Assert.Contains( staffId, result );
+            Assert.Equal(StaffOverrideOutcome.Completed, result.Outcome);
+            Assert.Contains( staffId, result.Message );
         }
 
         [Fact]
@@ -34,19 +35,31 @@ namespace AgenticWorkflowPoC.Tests.Plugins.Operations
         {
             // Arrange
             var hitl = new HitlStateService();
-            hitl.IsSuspended = false;
-            hitl.Reason = string.Empty;
             var plugin = new StaffOverridesPlugin(Microsoft.Extensions.Logging.Abstractions.NullLogger<StaffOverridesPlugin>.Instance, hitl);
             string staffId = "EMP-REQ-001"; // ID prefix that triggers the simulated conflict
-            string newAvailability = "2026-09-01T09:00:00Z";
+            var newAvailability = DateTimeOffset.Parse("2026-09-01T09:00:00Z");
 
             // Act
             var result = await plugin.OverrideAvailabilityAsync( staffId, newAvailability );
 
             // Assert
-            Assert.Equal( "SYSTEM INSTRUCTION: STOP PROCESSING IMMEDIATELY. OPERATION SUSPENDED.", result );
+            Assert.Equal(StaffOverrideOutcome.RequiresApproval, result.Outcome);
             Assert.True( hitl.IsSuspended );
             Assert.Contains( staffId, hitl.Reason );
+        }
+
+        [Fact]
+        public async Task ExecuteApprovedAvailability_DoesNotReopenReview()
+        {
+            var hitl = new HitlStateService();
+            var plugin = new StaffOverridesPlugin(Microsoft.Extensions.Logging.Abstractions.NullLogger<StaffOverridesPlugin>.Instance, hitl);
+
+            var result = await plugin.ExecuteApprovedAvailabilityAsync(
+                "EMP-REQ-001",
+                DateTimeOffset.Parse("2026-09-01T09:00:00Z"));
+
+            Assert.Equal(StaffOverrideOutcome.Completed, result.Outcome);
+            Assert.False(hitl.IsSuspended);
         }
     }
 }

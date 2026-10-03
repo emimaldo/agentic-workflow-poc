@@ -1,9 +1,7 @@
-﻿using System.Text.Json;
+﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
-using AgenticWorkflowPoC.Plugins;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
 
 namespace AgenticWorkflowPoC.Api.Controllers
 {
@@ -13,8 +11,7 @@ namespace AgenticWorkflowPoC.Api.Controllers
     {
         private readonly AgenticWorkflowPoC.Api.Services.IAgentService _agentService;
         private readonly Microsoft.Extensions.Logging.ILogger<AgentController> _logger;
-        // Staff Note: In a production environment, you would inject the IAgentSessionRepository here
-        // to save and retrieve the ChatHistory from SQL Server.
+        // HITL state and pending actions are managed by the service layer.
 
         public AgentController( AgenticWorkflowPoC.Api.Services.IAgentService agentService, Microsoft.Extensions.Logging.ILogger<AgentController> logger )
         {
@@ -24,9 +21,9 @@ namespace AgenticWorkflowPoC.Api.Controllers
 
 
         [HttpPost( "invoke" )]
-        public async Task<IActionResult> InvokeAgent( [FromBody] AgenticWorkflowPoC.Api.Models.AgentRequest request )
+        public async Task<IActionResult> InvokeAgent( [FromBody] AgenticWorkflowPoC.Api.Models.AgentRequest request, CancellationToken cancellationToken )
         {
-            var response = await _agentService.InvokeAsync(request.SessionId, request.Prompt);
+            var response = await _agentService.InvokeAsync(request.SessionId, request.Prompt, cancellationToken);
 
             if (response.Status == "Suspended")
             {
@@ -42,10 +39,17 @@ namespace AgenticWorkflowPoC.Api.Controllers
         }
 
         [HttpPost( "resume/{sessionId}" )]
-        public async Task<IActionResult> ResumeAgent( string sessionId, [FromBody] AgenticWorkflowPoC.Api.Models.ResumeRequest request )
+        public async Task<IActionResult> ResumeAgent( Guid sessionId, [FromBody] AgenticWorkflowPoC.Api.Models.ResumeRequest request, CancellationToken cancellationToken )
         {
-            var response = await _agentService.ResumeAsync(sessionId, request.IsApproved);
-            return Ok(response);
+            var response = await _agentService.ResumeAsync(sessionId, request.IsApproved, cancellationToken);
+
+            return response.Status switch
+            {
+                "NotFound" => NotFound(response),
+                "Conflict" => Conflict(response),
+                "Error" => BadRequest(response),
+                _ => Ok(response)
+            };
         }
     }
 }

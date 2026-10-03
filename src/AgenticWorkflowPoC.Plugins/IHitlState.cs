@@ -2,7 +2,8 @@ namespace AgenticWorkflowPoC.Plugins
 {
     public interface IHitlState
     {
-        bool IsSuspended { get; set; }
-        string Reason { get; set; }
+        bool IsSuspended { get; }
+        string Reason { get; }
+        void Suspend(string reason);
     }
 }

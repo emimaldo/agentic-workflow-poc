@@ -1,9 +1,17 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace AgenticWorkflowPoC.Api.Services
 {
     public class ExtractionValidator : IExtractionValidator
     {
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+        };
+
         public ExtractionResult Validate(string jsonContent)
         {
             if (string.IsNullOrWhiteSpace(jsonContent))
@@ -13,33 +21,45 @@ namespace AgenticWorkflowPoC.Api.Services
 
             try
             {
-                using var doc = JsonDocument.Parse(jsonContent);
-                var root = doc.RootElement;
+                var extraction = JsonSerializer.Deserialize<ExtractionPayload>(jsonContent, JsonOptions);
 
-                if (root.TryGetProperty("error", out var _))
+                if (extraction is null)
+                {
+                    return new ExtractionResult(false, Error: "empty_payload");
+                }
+
+                if (!string.IsNullOrWhiteSpace(extraction.Error))
                 {
                     return new ExtractionResult(false, Error: "missing_data");
                 }
 
-                if (!root.TryGetProperty("staffId", out var staffIdProp) || !root.TryGetProperty("date", out var dateProp))
+                if (string.IsNullOrWhiteSpace(extraction.StaffId) || string.IsNullOrWhiteSpace(extraction.Date))
                 {
                     return new ExtractionResult(false, Error: "missing_fields");
                 }
 
-                var staffId = staffIdProp.GetString();
-                var date = dateProp.GetString();
-
-                if (string.IsNullOrWhiteSpace(staffId) || string.IsNullOrWhiteSpace(date))
+                if (!DateTimeOffset.TryParse(
+                    extraction.Date,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out var date))
                 {
-                    return new ExtractionResult(false, Error: "incomplete_data");
+                    return new ExtractionResult(false, Error: "invalid_date");
                 }
 
-                return new ExtractionResult(true, StaffId: staffId, Date: date);
+                return new ExtractionResult(true, StaffId: extraction.StaffId, Date: date);
             }
             catch (JsonException)
             {
                 return new ExtractionResult(false, Error: "invalid_json");
             }
+        }
+
+        private sealed class ExtractionPayload
+        {
+            public string? StaffId { get; init; }
+            public string? Date { get; init; }
+            public string? Error { get; init; }
         }
     }
 }

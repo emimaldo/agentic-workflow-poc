@@ -1,13 +1,15 @@
-using System.Collections.Generic;
+using System;
+using System.Text.Json;
 using System.Threading.Tasks;
+using AgenticWorkflowPoC.Api.Development;
 using AgenticWorkflowPoC.Api.Models;
 using AgenticWorkflowPoC.Api.Services;
+using AgenticWorkflowPoC.Core.Entities;
 using AgenticWorkflowPoC.Plugins;
 using AgenticWorkflowPoC.Plugins.Operations;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using Xunit;
 
 namespace AgenticWorkflowPoC.Tests.Services
@@ -18,101 +20,125 @@ namespace AgenticWorkflowPoC.Tests.Services
         public async Task InvokeAsync_WhenModelReturnsConflict_ServiceReturnsSuspended()
         {
             var hitl = new HitlStateService();
-            var fakeChat = new FakeChatCompletionService(returnConflict: true);
+            var fakeChat = new FakeChatClient(returnConflict: true);
+            var repository = new InMemoryHitlSessionRepository();
+            var sessionId = Guid.NewGuid();
+            var agentService = CreateAgentService(fakeChat, hitl, repository);
 
-            var services = new ServiceCollection();
-            services.AddSingleton<StaffOverridesPlugin>(sp => new StaffOverridesPlugin(NullLogger<StaffOverridesPlugin>.Instance, hitl));
-            var provider = services.BuildServiceProvider();
-
-            var validator = new ExtractionValidator();
-            var agentService = new AgentService(fakeChat, hitl, NullLogger<AgentService>.Instance, provider, validator);
-
-            var resp = await agentService.InvokeAsync("s1", "prompt");
+            var resp = await agentService.InvokeAsync(sessionId, "prompt");
 
             Assert.Equal("Suspended", resp.Status);
             Assert.False(string.IsNullOrWhiteSpace(resp.Message));
+            var session = await repository.GetAsync(sessionId);
+            Assert.Equal(HitlSessionStatus.PendingReview, session?.Status);
+            Assert.Contains("EMP-REQ-001", session?.PendingActionPayload);
         }
 
         [Fact]
         public async Task InvokeAsync_WhenModelReturnsOk_ServiceReturnsCompleted()
         {
             var hitl = new HitlStateService();
-            var fakeChat = new FakeChatCompletionService(returnConflict: false);
+            var fakeChat = new FakeChatClient(returnConflict: false);
+            var agentService = CreateAgentService(fakeChat, hitl, new InMemoryHitlSessionRepository());
 
-            var services = new ServiceCollection();
-            services.AddSingleton<StaffOverridesPlugin>(sp => new StaffOverridesPlugin(NullLogger<StaffOverridesPlugin>.Instance, hitl));
-            var provider = services.BuildServiceProvider();
-
-            var validator = new ExtractionValidator();
-            var agentService = new AgentService(fakeChat, hitl, NullLogger<AgentService>.Instance, provider, validator);
-
-            var resp = await agentService.InvokeAsync("s2", "prompt");
+            var resp = await agentService.InvokeAsync(Guid.NewGuid(), "prompt");
 
             Assert.Equal("Completed", resp.Status);
             Assert.Contains("SUCCESS", resp.Response);
         }
 
         [Fact]
-        public async Task ResumeAsync_ReturnsModelContent()
+        public async Task ResumeAsync_WhenApproved_ExecutesPendingActionAndCompletesSession()
         {
             var hitl = new HitlStateService();
-            var fakeChat = new FakeChatCompletionService(returnConflict: false, resumeContent: "OK_RESUME");
-            var validator = new ExtractionValidator();
-            var services = new ServiceCollection();
-            var provider = services.BuildServiceProvider();
+            var fakeChat = new FakeChatClient(returnConflict: false);
+            var repository = new InMemoryHitlSessionRepository();
+            var sessionId = Guid.NewGuid();
+            await repository.CreatePendingAsync(CreatePendingSession(sessionId));
+            var agentService = CreateAgentService(fakeChat, hitl, repository);
 
-            var agentService = new AgentService(fakeChat, hitl, NullLogger<AgentService>.Instance, provider, validator);
-
-            var resp = await agentService.ResumeAsync("s-1", true);
+            var resp = await agentService.ResumeAsync(sessionId, true);
 
             Assert.Equal("Completed", resp.Status);
-            Assert.Equal("OK_RESUME", resp.Response);
-        }
-    }
-
-    internal class FakeChatCompletionService : IChatCompletionService
-    {
-        private readonly bool _returnConflict;
-        private readonly string? _resumeContent;
-
-        public FakeChatCompletionService(bool returnConflict, string? resumeContent = null)
-        {
-            _returnConflict = returnConflict;
-            _resumeContent = resumeContent;
+            Assert.Contains("SUCCESS", resp.Response);
+            Assert.Equal(HitlSessionStatus.Completed, (await repository.GetAsync(sessionId))?.Status);
+            Assert.Equal(0, fakeChat.CallCount);
         }
 
-        public IReadOnlyDictionary<string, object?> Attributes => new Dictionary<string, object?>();
-
-        public Task<IReadOnlyList<Microsoft.SemanticKernel.ChatMessageContent>> GetChatMessageContentsAsync(ChatHistory chatHistory, PromptExecutionSettings? executionSettings = null, Kernel? kernel = null, System.Threading.CancellationToken cancellationToken = default)
+        [Fact]
+        public async Task ResumeAsync_WhenRejected_RejectsWithoutCallingModel()
         {
-            var content = new Microsoft.SemanticKernel.ChatMessageContent();
+            var fakeChat = new FakeChatClient(returnConflict: false);
+            var repository = new InMemoryHitlSessionRepository();
+            var sessionId = Guid.NewGuid();
+            await repository.CreatePendingAsync(CreatePendingSession(sessionId));
+            var agentService = CreateAgentService(fakeChat, new HitlStateService(), repository);
 
-            if (!string.IsNullOrEmpty(_resumeContent))
-            {
-                content.Content = _resumeContent;
-            }
-            else if (_returnConflict)
-            {
-                content.Content = "{\"staffId\": \"EMP-REQ-001\", \"date\": \"2026-09-01T09:00:00Z\"}";
-            }
-            else
-            {
-                content.Content = "{\"staffId\": \"EMP-102\", \"date\": \"2026-09-01T09:00:00Z\"}";
-            }
+            var response = await agentService.ResumeAsync(sessionId, false);
 
-            IReadOnlyList<Microsoft.SemanticKernel.ChatMessageContent> list = new List<Microsoft.SemanticKernel.ChatMessageContent> { content };
-            return Task.FromResult(list);
+            Assert.Equal("Rejected", response.Status);
+            Assert.Equal(HitlSessionStatus.Rejected, (await repository.GetAsync(sessionId))?.Status);
+            Assert.Equal(0, fakeChat.CallCount);
         }
 
-        public IAsyncEnumerable<Microsoft.SemanticKernel.StreamingChatMessageContent> GetStreamingChatMessageContentsAsync(ChatHistory chatHistory, PromptExecutionSettings? executionSettings = null, Kernel? kernel = null, System.Threading.CancellationToken cancellationToken = default)
+        [Fact]
+        public async Task ResumeAsync_WhenSessionDoesNotExist_ReturnsNotFound()
         {
-            return StreamImpl();
+            var agentService = CreateAgentService(
+                new FakeChatClient(returnConflict: false),
+                new HitlStateService(),
+                new InMemoryHitlSessionRepository());
 
-            async IAsyncEnumerable<Microsoft.SemanticKernel.StreamingChatMessageContent> StreamImpl()
-            {
-                await System.Threading.Tasks.Task.Yield();
-                yield break;
-            }
+            var response = await agentService.ResumeAsync(Guid.NewGuid(), true);
+
+            Assert.Equal("NotFound", response.Status);
+        }
+
+        [Fact]
+        public async Task ResumeAsync_WhenSessionAlreadyResolved_ReturnsConflict()
+        {
+            var repository = new InMemoryHitlSessionRepository();
+            var sessionId = Guid.NewGuid();
+            await repository.CreatePendingAsync(CreatePendingSession(sessionId));
+            var agentService = CreateAgentService(
+                new FakeChatClient(returnConflict: false),
+                new HitlStateService(),
+                repository);
+
+            await agentService.ResumeAsync(sessionId, false);
+            var secondResponse = await agentService.ResumeAsync(sessionId, true);
+
+            Assert.Equal("Conflict", secondResponse.Status);
+        }
+
+        private static AgentService CreateAgentService(
+            FakeChatClient fakeChat,
+            IHitlState hitl,
+            InMemoryHitlSessionRepository repository)
+        {
+            var plugin = new StaffOverridesPlugin(NullLogger<StaffOverridesPlugin>.Instance, hitl);
+            var agent = fakeChat.AsAIAgent(instructions: "Extract staffId and date as JSON.");
+            return new AgentService(
+                agent,
+                hitl,
+                NullLogger<AgentService>.Instance,
+                plugin,
+                new ExtractionValidator(),
+                repository);
+        }
+
+        private static HitlSession CreatePendingSession(Guid sessionId)
+        {
+            var payload = JsonSerializer.Serialize(new PendingStaffOverride(
+                "EMP-REQ-001",
+                DateTimeOffset.Parse("2026-09-01T09:00:00Z")));
+
+            return new HitlSession(
+                sessionId,
+                "Requires human review.",
+                payload,
+                HitlSessionStatus.PendingReview,
+                DateTimeOffset.UtcNow);
         }
     }
 }

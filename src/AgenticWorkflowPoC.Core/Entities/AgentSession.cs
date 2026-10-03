@@ -16,7 +16,7 @@ namespace AgenticWorkflowPoC.Core.Entities
         // Status can be: "Active", "Suspended_HITL", "Completed", "Canceled"
         public string Status { get; set; } = string.Empty;
 
-        // The serialized ChatHistory from Semantic Kernel
+        // Serialized conversation state, when conversation persistence is enabled.
         public string ChatHistoryJson { get; set; } = string.Empty;
 
         // Optional payload if the agent was trying to execute a specific action before pausing

@@ -13,3 +13,12 @@ CREATE TABLE dbo.AgentSessions (
     LastUpdated DATETIME NOT NULL
 );
 GO
+
+CREATE TABLE dbo.HitlSessions (
+    SessionId UNIQUEIDENTIFIER PRIMARY KEY,
+    Reason NVARCHAR(500) NOT NULL,
+    PendingActionPayload NVARCHAR(MAX) NOT NULL,
+    Status NVARCHAR(32) NOT NULL,
+    SuspendedAt DATETIMEOFFSET NOT NULL
+);
+GO

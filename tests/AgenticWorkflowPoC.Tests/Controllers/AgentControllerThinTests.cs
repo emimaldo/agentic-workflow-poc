@@ -1,3 +1,5 @@
+using System;
+using System.Threading;
 using System.Threading.Tasks;
 using AgenticWorkflowPoC.Api.Controllers;
 using AgenticWorkflowPoC.Api.Models;
@@ -13,11 +15,11 @@ namespace AgenticWorkflowPoC.Tests.Controllers
         [Fact]
         public async Task InvokeAgent_DelegatesToService_ReturnsAcceptedWhenSuspended()
         {
-            var fake = new FakeAgentService(new AgentResponse("Suspended", "reason", "s1"));
+            var fake = new FakeAgentService(new AgentResponse("Suspended", "reason", Guid.NewGuid().ToString()));
             var controller = new AgentController(fake, NullLogger<AgentController>.Instance);
 
-            var req = new AgentRequest("s1", "prompt");
-            var res = await controller.InvokeAgent(req);
+            var req = new AgentRequest(Guid.NewGuid(), "prompt");
+            var res = await controller.InvokeAgent(req, CancellationToken.None);
 
             Assert.IsType<AcceptedResult>(res);
         }
@@ -28,7 +30,7 @@ namespace AgenticWorkflowPoC.Tests.Controllers
             var fake = new FakeAgentService(new AgentResponse("Completed", Response: "ok"));
             var controller = new AgentController(fake, NullLogger<AgentController>.Instance);
 
-            var res = await controller.ResumeAgent("s1", new ResumeRequest(true));
+            var res = await controller.ResumeAgent(Guid.NewGuid(), new ResumeRequest(true), CancellationToken.None);
 
             Assert.IsType<OkObjectResult>(res);
         }
@@ -37,8 +39,8 @@ namespace AgenticWorkflowPoC.Tests.Controllers
         {
             private readonly AgentResponse _resp;
             public FakeAgentService(AgentResponse resp) => _resp = resp;
-            public Task<AgentResponse> InvokeAsync(string sessionId, string prompt) => Task.FromResult(_resp);
-            public Task<AgentResponse> ResumeAsync(string sessionId, bool isApproved) => Task.FromResult(_resp);
+            public Task<AgentResponse> InvokeAsync(Guid sessionId, string prompt, CancellationToken cancellationToken = default) => Task.FromResult(_resp);
+            public Task<AgentResponse> ResumeAsync(Guid sessionId, bool isApproved, CancellationToken cancellationToken = default) => Task.FromResult(_resp);
         }
     }
 }

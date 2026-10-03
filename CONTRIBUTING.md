@@ -26,7 +26,7 @@ Revisión
 - Etiquetar reviewers relevantes y explicar el alcance del PR.
 
 Configuración local recomendada
-- .NET 9 SDK
+- .NET 10 SDK
 - Ejecutar `dotnet restore` y `dotnet test` antes de push
 
 Contacto
