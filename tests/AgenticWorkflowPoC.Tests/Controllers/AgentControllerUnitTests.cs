@@ -22,7 +22,7 @@ namespace AgenticWorkflowPoC.Tests.Controllers
                 new AgentRequest(Guid.NewGuid(), FakeChatClient.HighValueIntent),
                 CancellationToken.None);
 
-            Assert.IsType<AcceptedResult>(result);
+            Assert.IsType<AcceptedAtRouteResult>(result);
             Assert.True(scenario.Hitl.IsSuspended);
             Assert.False(string.IsNullOrWhiteSpace(scenario.Hitl.Reason));
         }

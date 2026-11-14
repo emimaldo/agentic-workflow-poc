@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using AgenticWorkflowPoC.Api.Development;
+using AgenticWorkflowPoC.Api.Models;
 using AgenticWorkflowPoC.Core.Entities;
 using AgenticWorkflowPoC.Tests.Support;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -26,43 +27,74 @@ namespace AgenticWorkflowPoC.Tests.Integration
             var factory = ApiFactory.Create(_factory, scenario);
             var sessionId = Guid.NewGuid();
             var payload = new { SessionId = sessionId, Prompt = FakeChatClient.HighValueIntent };
+            var sessionPath = $"/api/v1/tenants/{TransferScenario.TenantA}/sessions/{sessionId}";
 
             var anonymous = await ApiFactory.CreateClient(factory, null).PostAsJsonAsync("/api/agent/invoke", payload);
             Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
 
-            var admin = ApiFactory.CreateClient(factory, ApiFactory.AdminKeyA);
-            var invoke = await admin.PostAsJsonAsync("/api/agent/invoke", payload);
+            // 1. Out-of-band suspension: 202 + Location pointing to the session resource.
+            var user = ApiFactory.CreateClient(factory, ApiFactory.UserKeyA);
+            var invoke = await user.PostAsJsonAsync("/api/agent/invoke", payload);
             Assert.Equal(HttpStatusCode.Accepted, invoke.StatusCode);
-            Assert.Contains("Suspended", await invoke.Content.ReadAsStringAsync());
+            Assert.Equal(sessionPath, invoke.Headers.Location?.AbsolutePath);
             Assert.Equal(0, scenario.Ledger.ExecutedCount);
 
-            var user = ApiFactory.CreateClient(factory, ApiFactory.UserKeyA);
-            var forbidden = await user.PostAsJsonAsync($"/api/agent/resume/{sessionId}", new { IsApproved = true });
+            var status = await user.GetFromJsonAsync<HitlSessionView>(invoke.Headers.Location);
+            Assert.Equal("PendingReview", status?.Status);
+
+            // 2. Only operators (RequireAdminRole) can resume.
+            var forbidden = await user.PostAsJsonAsync($"{sessionPath}/resume", new { IsApproved = true });
             Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
 
-            var resume = await admin.PostAsJsonAsync($"/api/agent/resume/{sessionId}", new { IsApproved = true });
+            var admin = ApiFactory.CreateClient(factory, ApiFactory.AdminKeyA);
+            var resume = await admin.PostAsJsonAsync($"{sessionPath}/resume", new { IsApproved = true });
             Assert.Equal(HttpStatusCode.Accepted, resume.StatusCode);
-            Assert.Contains("Queued", await resume.Content.ReadAsStringAsync());
+            Assert.Equal(sessionPath, resume.Headers.Location?.AbsolutePath);
 
+            // 3. Background execution, no further inference.
             var finalSession = await WaitForStatusAsync(scenario, sessionId, HitlSessionStatus.Completed, TimeSpan.FromSeconds(5));
             Assert.Equal(HitlSessionStatus.Completed, finalSession?.Status);
             Assert.Equal(1, scenario.Ledger.ExecutedCount);
             Assert.Equal(1, scenario.Chat.CallCount);
+            Assert.Equal("Completed", (await user.GetFromJsonAsync<HitlSessionView>(sessionPath))?.Status);
+
+            var second = await admin.PostAsJsonAsync($"{sessionPath}/resume", new { IsApproved = true });
+            Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
         }
 
         [Fact]
-        public async Task ResumeAgent_WhenSessionBelongsToAnotherTenant_ReturnsNotFound()
+        public async Task SessionEndpoints_AreInvisibleAcrossTenants()
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
             await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
             var factory = ApiFactory.Create(_factory, scenario);
+            var tenantB = ApiFactory.CreateClient(factory, ApiFactory.AdminKeyB);
 
-            var response = await ApiFactory.CreateClient(factory, ApiFactory.AdminKeyB)
-                .PostAsJsonAsync($"/api/agent/resume/{sessionId}", new { IsApproved = true });
+            // Tenant B addressing tenant A's route, and tenant B's own route with A's session id.
+            var crossRoute = await tenantB.GetAsync($"/api/v1/tenants/{TransferScenario.TenantA}/sessions/{sessionId}");
+            var ownRoute = await tenantB.GetAsync($"/api/v1/tenants/{TransferScenario.TenantB}/sessions/{sessionId}");
+            var crossResume = await tenantB.PostAsJsonAsync(
+                $"/api/v1/tenants/{TransferScenario.TenantA}/sessions/{sessionId}/resume", new { IsApproved = true });
+            var ownResume = await tenantB.PostAsJsonAsync(
+                $"/api/v1/tenants/{TransferScenario.TenantB}/sessions/{sessionId}/resume", new { IsApproved = true });
+
+            Assert.Equal(HttpStatusCode.NotFound, crossRoute.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, ownRoute.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, crossResume.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, ownResume.StatusCode);
+            Assert.Equal(HitlSessionStatus.PendingReview, (await scenario.Repository.GetAsync(TransferScenario.TenantA, sessionId))?.Status);
+        }
+
+        [Fact]
+        public async Task LegacyResumeRoute_IsGone()
+        {
+            var factory = ApiFactory.Create(_factory, new TransferScenario());
+
+            var response = await ApiFactory.CreateClient(factory, ApiFactory.AdminKeyA)
+                .PostAsJsonAsync($"/api/agent/resume/{Guid.NewGuid()}", new { IsApproved = true });
 
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-            Assert.Equal(HitlSessionStatus.PendingReview, (await scenario.Repository.GetAsync(TransferScenario.TenantA, sessionId))?.Status);
         }
 
         [Fact]

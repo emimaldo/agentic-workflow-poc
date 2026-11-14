@@ -29,7 +29,8 @@ builder.Services
     .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
         ApiKeyAuthenticationHandler.SchemeName,
         _ => { });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+    options.AddPolicy(AuthorizationPolicies.RequireAdminRole, policy => policy.RequireRole("Admin")));
 
 // Tenant context (Chapter 2): resolved only from the authenticated principal.
 builder.Services.AddHttpContextAccessor();

@@ -3,7 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgenticWorkflowPoC.Api.Controllers;
 using AgenticWorkflowPoC.Api.Models;
+using AgenticWorkflowPoC.Api.Development;
 using AgenticWorkflowPoC.Api.Services;
+using AgenticWorkflowPoC.Tests.Support;
 using Microsoft.AspNetCore.Mvc;
 using Xunit;
 
@@ -14,23 +16,37 @@ namespace AgenticWorkflowPoC.Tests.Controllers
         [Fact]
         public async Task InvokeAgent_DelegatesToService_ReturnsAcceptedWhenSuspended()
         {
-            var fake = new FakeAgentService(invoke: new RoutingOutcome.Suspended(Guid.NewGuid(), "reason"));
+            var fake = new FakeAgentService(invoke: new RoutingOutcome.Suspended(Guid.NewGuid(), "tenant-a", "reason"));
             var controller = new AgentController(fake);
 
             var res = await controller.InvokeAgent(new AgentRequest(Guid.NewGuid(), "prompt"), CancellationToken.None);
 
-            Assert.IsType<AcceptedResult>(res);
+            var accepted = Assert.IsType<AcceptedAtRouteResult>(res);
+            Assert.Equal(TenantSessionsController.GetSessionRouteName, accepted.RouteName);
+            Assert.Equal("tenant-a", accepted.RouteValues?["tenantId"]);
         }
 
         [Fact]
-        public async Task ResumeAgent_DelegatesToService_ReturnsAcceptedWhenQueued()
+        public async Task Resume_WhenQueued_ReturnsAcceptedWithSessionLocation()
         {
-            var fake = new FakeAgentService(resume: new ResumeOutcome.Queued(Guid.NewGuid()));
-            var controller = new AgentController(fake);
+            var fake = new FakeAgentService(resume: new ResumeOutcome.Queued(Guid.NewGuid(), "tenant-a"));
+            var controller = new TenantSessionsController(fake, new InMemoryHitlSessionRepository(), new FixedTenantAccessor("tenant-a"));
 
-            var res = await controller.ResumeAgent(Guid.NewGuid(), new ResumeRequest(true), CancellationToken.None);
+            var res = await controller.Resume("tenant-a", Guid.NewGuid(), new ResumeSessionRequest(true), CancellationToken.None);
 
-            Assert.IsType<AcceptedResult>(res);
+            Assert.Equal(TenantSessionsController.GetSessionRouteName, Assert.IsType<AcceptedAtRouteResult>(res).RouteName);
+        }
+
+        [Fact]
+        public async Task Resume_WhenRouteTenantDiffersFromCaller_ReturnsNotFoundWithoutCallingService()
+        {
+            var fake = new FakeAgentService(resume: new ResumeOutcome.Queued(Guid.NewGuid(), "tenant-b"));
+            var controller = new TenantSessionsController(fake, new InMemoryHitlSessionRepository(), new FixedTenantAccessor("tenant-a"));
+
+            var res = await controller.Resume("tenant-b", Guid.NewGuid(), new ResumeSessionRequest(true), CancellationToken.None);
+
+            Assert.IsType<NotFoundResult>(res);
+            Assert.False(fake.Called);
         }
 
         [Fact]

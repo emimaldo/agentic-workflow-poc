@@ -44,32 +44,13 @@ namespace AgenticWorkflowPoC.Api.Controllers
                 RoutingOutcome.Completed completed =>
                     Ok(new SessionResponse(completed.SessionId, "Completed", completed.Message)),
                 RoutingOutcome.Suspended suspended =>
-                    Accepted(new SessionResponse(suspended.SessionId, "Suspended", suspended.Reason)),
+                    // Out-of-band suspension: release the thread and point to the session resource.
+                    AcceptedAtRoute(
+                        TenantSessionsController.GetSessionRouteName,
+                        new { tenantId = suspended.TenantId, sessionId = suspended.SessionId },
+                        new SessionResponse(suspended.SessionId, "Suspended", suspended.Reason)),
                 RoutingOutcome.Rejected rejected =>
                     UnprocessableProblem(rejected),
-                _ => throw new UnreachableException()
-            };
-        }
-
-        [Authorize(Roles = "Admin")]
-        [HttpPost("resume/{sessionId}")]
-        public async Task<IActionResult> ResumeAgent(Guid sessionId, [FromBody] ResumeRequest request, CancellationToken cancellationToken)
-        {
-            var outcome = await _agentService.ResumeAsync(sessionId, request.IsApproved, cancellationToken);
-
-            return outcome switch
-            {
-                ResumeOutcome.Queued queued =>
-                    Accepted(new SessionResponse(queued.SessionId, "Queued", "The approved transfer was queued for background processing.")),
-                ResumeOutcome.RejectedByOperator rejected =>
-                    Ok(new SessionResponse(rejected.SessionId, "Rejected", "The pending transfer was rejected.")),
-                ResumeOutcome.NotFound =>
-                    NotFound(),
-                ResumeOutcome.AlreadyResolved resolved =>
-                    Problem(
-                        statusCode: StatusCodes.Status409Conflict,
-                        title: "The HITL session has already been resolved.",
-                        detail: $"Current status: {resolved.CurrentStatus}."),
                 _ => throw new UnreachableException()
             };
         }

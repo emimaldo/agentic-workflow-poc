@@ -22,7 +22,7 @@ namespace AgenticWorkflowPoC.Api.Models
         public sealed record Completed(Guid SessionId, string Message) : RoutingOutcome(SessionId);
 
         /// <summary>Persisted for Human-in-the-Loop review → HTTP 202 Accepted.</summary>
-        public sealed record Suspended(Guid SessionId, string Reason) : RoutingOutcome(SessionId);
+        public sealed record Suspended(Guid SessionId, string TenantId, string Reason) : RoutingOutcome(SessionId);
 
         /// <summary>Rejected by validation or domain rules → HTTP 422.</summary>
         public sealed record Rejected(Guid SessionId, IReadOnlyList<RoutingError> Errors) : RoutingOutcome(SessionId);
@@ -36,7 +36,7 @@ namespace AgenticWorkflowPoC.Api.Models
         public Guid SessionId { get; }
 
         /// <summary>Approval persisted; execution happens in the background → HTTP 202.</summary>
-        public sealed record Queued(Guid SessionId) : ResumeOutcome(SessionId);
+        public sealed record Queued(Guid SessionId, string TenantId) : ResumeOutcome(SessionId);
 
         /// <summary>Operator rejected the operation → HTTP 200.</summary>
         public sealed record RejectedByOperator(Guid SessionId) : ResumeOutcome(SessionId);

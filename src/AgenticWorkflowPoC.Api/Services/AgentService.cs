@@ -91,7 +91,7 @@ namespace AgenticWorkflowPoC.Api.Services
                         cancellationToken);
 
                     _logger.LogWarning("Transfer suspended for SessionId={SessionId}: {Reason}", sessionId, _hitlState.Reason);
-                    return new RoutingOutcome.Suspended(sessionId, _hitlState.Reason);
+                    return new RoutingOutcome.Suspended(sessionId, command.TenantId, _hitlState.Reason);
 
                 default:
                     throw new InvalidOperationException("The plugin required approval without setting the HITL state.");
@@ -131,7 +131,7 @@ namespace AgenticWorkflowPoC.Api.Services
             }
 
             return isApproved
-                ? new ResumeOutcome.Queued(sessionId)
+                ? new ResumeOutcome.Queued(sessionId, tenantId)
                 : new ResumeOutcome.RejectedByOperator(sessionId);
         }
     }
