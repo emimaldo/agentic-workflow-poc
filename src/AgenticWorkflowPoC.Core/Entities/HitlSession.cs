@@ -6,6 +6,7 @@ namespace AgenticWorkflowPoC.Core.Entities
     {
         PendingReview,
         Approved,
+        Processing,
         Rejected,
         Completed,
         Failed
@@ -13,10 +14,13 @@ namespace AgenticWorkflowPoC.Core.Entities
 
     public sealed record HitlSession(
         Guid SessionId,
+        string TenantId,
         string Reason,
         string PendingActionPayload,
         HitlSessionStatus Status,
-        DateTimeOffset SuspendedAt);
+        DateTimeOffset SuspendedAt,
+        int ExecutionAttempts = 0,
+        DateTimeOffset? ProcessingStartedAt = null);
 
     public sealed record PendingStaffOverride(string StaffId, DateTimeOffset NewAvailability);
 }

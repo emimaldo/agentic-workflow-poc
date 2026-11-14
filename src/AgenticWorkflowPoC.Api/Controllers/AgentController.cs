@@ -1,12 +1,15 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AgenticWorkflowPoC.Api.Controllers
 {
     [ApiController]
     [Route( "api/[controller]" )]
+    [Authorize]
     public class AgentController : ControllerBase
     {
         private readonly AgenticWorkflowPoC.Api.Services.IAgentService _agentService;
@@ -23,7 +26,13 @@ namespace AgenticWorkflowPoC.Api.Controllers
         [HttpPost( "invoke" )]
         public async Task<IActionResult> InvokeAgent( [FromBody] AgenticWorkflowPoC.Api.Models.AgentRequest request, CancellationToken cancellationToken )
         {
-            var response = await _agentService.InvokeAsync(request.SessionId, request.Prompt, cancellationToken);
+            var tenantId = User.FindFirstValue("tenant_id");
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                return Forbid();
+            }
+
+            var response = await _agentService.InvokeAsync(request.SessionId, tenantId, request.Prompt, cancellationToken);
 
             if (response.Status == "Suspended")
             {
@@ -38,16 +47,24 @@ namespace AgenticWorkflowPoC.Api.Controllers
             return Ok(response);
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpPost( "resume/{sessionId}" )]
         public async Task<IActionResult> ResumeAgent( Guid sessionId, [FromBody] AgenticWorkflowPoC.Api.Models.ResumeRequest request, CancellationToken cancellationToken )
         {
-            var response = await _agentService.ResumeAsync(sessionId, request.IsApproved, cancellationToken);
+            var tenantId = User.FindFirstValue("tenant_id");
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                return Forbid();
+            }
+
+            var response = await _agentService.ResumeAsync(sessionId, tenantId, request.IsApproved, cancellationToken);
 
             return response.Status switch
             {
                 "NotFound" => NotFound(response),
                 "Conflict" => Conflict(response),
                 "Error" => BadRequest(response),
+                "Queued" => Accepted(response),
                 _ => Ok(response)
             };
         }

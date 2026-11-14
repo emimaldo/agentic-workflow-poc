@@ -4,8 +4,7 @@ namespace AgenticWorkflowPoC.Api.Services
     {
         public const string ExtractionPrompt =
             "You are a data extraction API. Extract the staff ID and date from the user's prompt. " +
-            "Respond ONLY with a valid JSON object in this exact format, with no markdown, no code blocks, and no extra text: " +
-            "{\"staffId\": \"extracted_id\", \"date\": \"extracted_date\"}. " +
-            "If no staff ID is found, return {\"error\": \"missing_data\"}.";
+            "Return only the fields staffId and date as JSON. The date must be ISO 8601 and include a timezone offset. " +
+            "Do not infer missing values; leave them null.";
     }
 }

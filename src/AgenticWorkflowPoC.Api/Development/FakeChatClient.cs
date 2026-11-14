@@ -9,10 +9,16 @@ namespace AgenticWorkflowPoC.Api.Development
     public sealed class FakeChatClient : IChatClient
     {
         private readonly bool _returnConflict;
+        private readonly string? _responseOverride;
 
         public FakeChatClient(bool returnConflict = true)
         {
             _returnConflict = returnConflict;
+        }
+
+        public FakeChatClient(string response)
+        {
+            _responseOverride = response;
         }
 
         public int CallCount { get; private set; }
@@ -25,9 +31,9 @@ namespace AgenticWorkflowPoC.Api.Development
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
 
-            var content = _returnConflict
+            var content = _responseOverride ?? (_returnConflict
                 ? "{\"staffId\": \"EMP-REQ-001\", \"date\": \"2026-09-01T09:00:00Z\"}"
-                : "{\"staffId\": \"EMP-102\", \"date\": \"2026-09-01T09:00:00Z\"}";
+                : "{\"staffId\": \"EMP-102\", \"date\": \"2026-09-01T09:00:00Z\"}");
 
             return Task.FromResult(new ChatResponse(
                 new ChatMessage(ChatRole.Assistant, content)));

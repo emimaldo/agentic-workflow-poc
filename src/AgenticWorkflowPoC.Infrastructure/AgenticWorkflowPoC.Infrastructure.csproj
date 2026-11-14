@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AgenticWorkflowPoC.Core\AgenticWorkflowPoC.Core.csproj" />
+    <ProjectReference Include="..\AgenticWorkflowPoC.Plugins\AgenticWorkflowPoC.Plugins.csproj" />
   </ItemGroup>
 
   <ItemGroup>

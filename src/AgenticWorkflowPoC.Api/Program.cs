@@ -1,6 +1,10 @@
 using AgenticWorkflowPoC.Api.Configuration;
+using AgenticWorkflowPoC.Api.Security;
+using AgenticWorkflowPoC.Api.Services;
 using AgenticWorkflowPoC.Core.Interfaces;
 using AgenticWorkflowPoC.Infrastructure.Persistence;
+using AgenticWorkflowPoC.Plugins.Operations;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -15,6 +19,15 @@ builder.Services.AddEndpointsApiExplorer();
 // 2. Infrastructure Registration (Placeholder for future implementation)
 builder.Services.AddScoped<IAgentSessionRepository, SqlAgentSessionRepo>();
 builder.Services.AddScoped<IHitlSessionRepository, SqlHitlSessionRepository>();
+builder.Services.AddScoped<IStaffAvailabilityExecutor, SqlStaffAvailabilityExecutor>();
+builder.Services.AddHostedService<HitlSessionWorker>();
+
+builder.Services
+    .AddAuthentication(ApiKeyAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
+        ApiKeyAuthenticationHandler.SchemeName,
+        _ => { });
+builder.Services.AddAuthorization();
 
 // 3. Agent Framework setup (local Ollama by default)
 string modelId = builder.Configuration["Ollama:Model"] ?? "llama3.1";
@@ -32,6 +45,8 @@ if (builder.Configuration["USE_FAKE_CHAT"] == "true")
         new AgenticWorkflowPoC.Api.Development.FakeChatClient(returnConflict));
     builder.Services.RemoveAll<IHitlSessionRepository>();
     builder.Services.AddSingleton<IHitlSessionRepository, AgenticWorkflowPoC.Api.Development.InMemoryHitlSessionRepository>();
+    builder.Services.RemoveAll<IStaffAvailabilityExecutor>();
+    builder.Services.AddSingleton<IStaffAvailabilityExecutor, AgenticWorkflowPoC.Api.Development.InMemoryStaffAvailabilityExecutor>();
 }
 
 var app = builder.Build();
@@ -42,6 +57,7 @@ if( app.Environment.IsDevelopment() )
     //app.UseSwaggerUI();
 }
 
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 

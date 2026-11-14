@@ -42,5 +42,24 @@ namespace AgenticWorkflowPoC.Tests.Services
             Assert.False(result.IsValid);
             Assert.Equal("invalid_date", result.Error);
         }
+
+        [Fact]
+        public void Validate_WhenDateHasNoTimezone_RejectsIt()
+        {
+            var result = _validator.Validate("{\"staffId\":\"EMP-102\",\"date\":\"2026-09-01T09:00:00\"}");
+
+            Assert.False(result.IsValid);
+            Assert.Equal("invalid_date", result.Error);
+        }
+
+        [Fact]
+        public void Validate_WhenStaffIdIsTooLong_RejectsIt()
+        {
+            var staffId = new string('A', 101);
+            var result = _validator.Validate($"{{\"staffId\":\"{staffId}\",\"date\":\"2026-09-01T09:00:00Z\"}}");
+
+            Assert.False(result.IsValid);
+            Assert.Equal("invalid_staff_id", result.Error);
+        }
     }
 }

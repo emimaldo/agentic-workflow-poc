@@ -25,6 +25,7 @@ namespace AgenticWorkflowPoC.Api.Configuration
 
             services.AddTransient<IAgentService, AgentService>();
             services.AddSingleton<IExtractionValidator, ExtractionValidator>();
+            services.AddScoped<HitlWorkProcessor>();
 
             return services;
         }

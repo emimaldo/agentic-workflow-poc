@@ -7,7 +7,15 @@ namespace AgenticWorkflowPoC.Api.Services
 {
     public interface IAgentService
     {
-        Task<AgentResponse> InvokeAsync(Guid sessionId, string prompt, CancellationToken cancellationToken = default);
-        Task<AgentResponse> ResumeAsync(Guid sessionId, bool isApproved, CancellationToken cancellationToken = default);
+        Task<AgentResponse> InvokeAsync(
+            Guid sessionId,
+            string tenantId,
+            string prompt,
+            CancellationToken cancellationToken = default);
+        Task<AgentResponse> ResumeAsync(
+            Guid sessionId,
+            string tenantId,
+            bool isApproved,
+            CancellationToken cancellationToken = default);
     }
 }

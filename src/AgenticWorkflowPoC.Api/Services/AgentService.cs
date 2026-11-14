@@ -8,6 +8,7 @@ using AgenticWorkflowPoC.Core.Interfaces;
 using AgenticWorkflowPoC.Plugins;
 using AgenticWorkflowPoC.Plugins.Operations;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using AgentResponse = AgenticWorkflowPoC.Api.Models.AgentResponse;
 
@@ -38,15 +39,32 @@ namespace AgenticWorkflowPoC.Api.Services
             _hitlSessionRepository = hitlSessionRepository;
         }
 
-        public async Task<AgentResponse> InvokeAsync(Guid sessionId, string prompt, CancellationToken cancellationToken = default)
+        public async Task<AgentResponse> InvokeAsync(
+            Guid sessionId,
+            string tenantId,
+            string prompt,
+            CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("InvokeAgent called for SessionId={SessionId}", sessionId);
 
+            if (sessionId == Guid.Empty || string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(prompt))
+            {
+                return new AgentResponse("Error", "A session, tenant, and prompt are required.", sessionId.ToString());
+            }
+
             var modelResponse = await _extractionAgent.RunAsync(
                 prompt,
+                options: new ChatClientAgentRunOptions
+                {
+                    ChatOptions = new ChatOptions
+                    {
+                        ResponseFormat = ChatResponseFormat.ForJsonSchema<StaffAvailabilityExtraction>(),
+                        Temperature = 0,
+                        Tools = Array.Empty<AITool>()
+                    }
+                },
                 cancellationToken: cancellationToken);
             var content = modelResponse.Text;
-            _logger.LogDebug("Model returned content: {Content}", content ?? "<null>");
 
             if (string.IsNullOrWhiteSpace(content))
             {
@@ -63,7 +81,12 @@ namespace AgenticWorkflowPoC.Api.Services
             var date = validation.Date!.Value;
 
             _logger.LogInformation("Invoking StaffOverridesPlugin for staffId={StaffId} date={Date}", staffId, date);
-            var pluginResult = await _staffOverridesPlugin.OverrideAvailabilityAsync(staffId, date, cancellationToken);
+            var pluginResult = await _staffOverridesPlugin.OverrideAvailabilityAsync(
+                sessionId,
+                tenantId,
+                staffId,
+                date,
+                cancellationToken);
 
             if (pluginResult.Outcome == StaffOverrideOutcome.InvalidInput)
             {
@@ -75,6 +98,7 @@ namespace AgenticWorkflowPoC.Api.Services
                 var pendingAction = new PendingStaffOverride(staffId, date);
                 var pendingSession = new HitlSession(
                     sessionId,
+                    tenantId,
                     _hitlState.Reason,
                     JsonSerializer.Serialize(pendingAction),
                     HitlSessionStatus.PendingReview,
@@ -94,9 +118,13 @@ namespace AgenticWorkflowPoC.Api.Services
             return new AgentResponse("Completed", Response: pluginResult.Message, SessionId: sessionId.ToString());
         }
 
-        public async Task<AgentResponse> ResumeAsync(Guid sessionId, bool isApproved, CancellationToken cancellationToken = default)
+        public async Task<AgentResponse> ResumeAsync(
+            Guid sessionId,
+            string tenantId,
+            bool isApproved,
+            CancellationToken cancellationToken = default)
         {
-            var pendingSession = await _hitlSessionRepository.GetAsync(sessionId, cancellationToken);
+            var pendingSession = await _hitlSessionRepository.GetAsync(tenantId, sessionId, cancellationToken);
             if (pendingSession is null)
             {
                 return new AgentResponse("NotFound", "HITL session was not found.", sessionId.ToString());
@@ -109,6 +137,7 @@ namespace AgenticWorkflowPoC.Api.Services
 
             var resolvedStatus = isApproved ? HitlSessionStatus.Approved : HitlSessionStatus.Rejected;
             var transitioned = await _hitlSessionRepository.TryTransitionAsync(
+                tenantId,
                 sessionId,
                 HitlSessionStatus.PendingReview,
                 resolvedStatus,
@@ -124,70 +153,8 @@ namespace AgenticWorkflowPoC.Api.Services
                 return new AgentResponse("Rejected", "The pending operation was rejected.", sessionId.ToString());
             }
 
-            PendingStaffOverride? pendingAction;
-            try
-            {
-                pendingAction = JsonSerializer.Deserialize<PendingStaffOverride>(pendingSession.PendingActionPayload);
-            }
-            catch (JsonException)
-            {
-                await _hitlSessionRepository.TryTransitionAsync(
-                    sessionId,
-                    HitlSessionStatus.Approved,
-                    HitlSessionStatus.Failed,
-                    cancellationToken);
-                return new AgentResponse("Error", "The stored pending action is invalid.", sessionId.ToString());
-            }
-
-            if (pendingAction is null)
-            {
-                await _hitlSessionRepository.TryTransitionAsync(
-                    sessionId,
-                    HitlSessionStatus.Approved,
-                    HitlSessionStatus.Failed,
-                    cancellationToken);
-                return new AgentResponse("Error", "The stored pending action is empty.", sessionId.ToString());
-            }
-
-            try
-            {
-                var result = await _staffOverridesPlugin.ExecuteApprovedAvailabilityAsync(
-                    pendingAction.StaffId,
-                    pendingAction.NewAvailability,
-                    cancellationToken);
-
-                if (result.Outcome != StaffOverrideOutcome.Completed)
-                {
-                    await _hitlSessionRepository.TryTransitionAsync(
-                        sessionId,
-                        HitlSessionStatus.Approved,
-                        HitlSessionStatus.Failed,
-                        cancellationToken);
-                    return new AgentResponse("Error", result.Message, sessionId.ToString());
-                }
-
-                await _hitlSessionRepository.TryTransitionAsync(
-                    sessionId,
-                    HitlSessionStatus.Approved,
-                    HitlSessionStatus.Completed,
-                    cancellationToken);
-
-                return new AgentResponse("Completed", Response: result.Message, SessionId: sessionId.ToString());
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                _logger.LogError(exception, "Failed to execute approved HITL session {SessionId}", sessionId);
-                await _hitlSessionRepository.TryTransitionAsync(
-                    sessionId,
-                    HitlSessionStatus.Approved,
-                    HitlSessionStatus.Failed,
-                    cancellationToken);
-                return new AgentResponse("Error", "The approved operation failed.", sessionId.ToString());
-            }
+            return new AgentResponse("Queued", "The approved operation was queued for background processing.", sessionId.ToString());
         }
+
     }
 }

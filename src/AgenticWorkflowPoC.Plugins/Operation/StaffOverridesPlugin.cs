@@ -17,6 +17,7 @@ namespace AgenticWorkflowPoC.Plugins.Operations
     {
         private readonly ILogger<StaffOverridesPlugin> _logger;
         private readonly IHitlState _hitlState;
+        private readonly IStaffAvailabilityExecutor _availabilityExecutor;
 
         // Staff Note: In a production scenario, you would inject ILogger, IFeatureManager, 
         // and domain services (e.g., IStaffRepository) via the constructor.
@@ -25,13 +26,19 @@ namespace AgenticWorkflowPoC.Plugins.Operations
         private const string HitlReasonFormat = "A shift conflict was detected for staff {0}.";
         private const string ErrorInvalidInput = "Staff ID is required.";
 
-        public StaffOverridesPlugin( ILogger<StaffOverridesPlugin> logger, IHitlState hitlState )
+        public StaffOverridesPlugin(
+            ILogger<StaffOverridesPlugin> logger,
+            IHitlState hitlState,
+            IStaffAvailabilityExecutor availabilityExecutor )
         {
             _logger = logger;
             _hitlState = hitlState;
+            _availabilityExecutor = availabilityExecutor;
         }
 
         public async Task<StaffOverrideResult> OverrideAvailabilityAsync(
+            Guid operationId,
+            string tenantId,
             string staffId,
             System.DateTimeOffset newAvailability,
             System.Threading.CancellationToken ct = default )
@@ -39,7 +46,11 @@ namespace AgenticWorkflowPoC.Plugins.Operations
 
             _logger.LogInformation("StaffOverridesPlugin executing for {StaffId} at {Time}", staffId, newAvailability);
 
-            if( string.IsNullOrWhiteSpace(staffId) )
+            if( operationId == System.Guid.Empty
+                || string.IsNullOrWhiteSpace(tenantId)
+                || tenantId.Length > 100
+                || string.IsNullOrWhiteSpace(staffId)
+                || staffId.Length > 100 )
             {
                 return new StaffOverrideResult(StaffOverrideOutcome.InvalidInput, ErrorInvalidInput);
             }
@@ -56,21 +67,27 @@ namespace AgenticWorkflowPoC.Plugins.Operations
             }
 
             // 3. Execute "Happy Path" if no human intervention is required
-            await ExecuteOverrideAsync( staffId, newAvailability, ct );
+            await _availabilityExecutor.ExecuteAsync(operationId, tenantId, staffId, newAvailability, ct);
             return new StaffOverrideResult(StaffOverrideOutcome.Completed, string.Format(SuccessMessageFormat, staffId));
         }
 
         public async Task<StaffOverrideResult> ExecuteApprovedAvailabilityAsync(
+            Guid operationId,
+            string tenantId,
             string staffId,
             System.DateTimeOffset newAvailability,
             System.Threading.CancellationToken ct = default )
         {
-            if( string.IsNullOrWhiteSpace(staffId) )
+            if( operationId == System.Guid.Empty
+                || string.IsNullOrWhiteSpace(tenantId)
+                || tenantId.Length > 100
+                || string.IsNullOrWhiteSpace(staffId)
+                || staffId.Length > 100 )
             {
                 return new StaffOverrideResult(StaffOverrideOutcome.InvalidInput, ErrorInvalidInput);
             }
 
-            await ExecuteOverrideAsync( staffId, newAvailability, ct );
+            await _availabilityExecutor.ExecuteAsync(operationId, tenantId, staffId, newAvailability, ct);
             return new StaffOverrideResult(StaffOverrideOutcome.Completed, string.Format(SuccessMessageFormat, staffId));
         }
 
@@ -83,10 +100,5 @@ namespace AgenticWorkflowPoC.Plugins.Operations
             return Task.FromResult( conflict );
         }
 
-        private Task ExecuteOverrideAsync( string staffId, System.DateTimeOffset time, System.Threading.CancellationToken ct = default )
-        {
-            // Logic to execute the SQL UPDATE or publish an event to Azure Service Bus / RabbitMQ
-            return Task.CompletedTask;
-        }
     }
 }
