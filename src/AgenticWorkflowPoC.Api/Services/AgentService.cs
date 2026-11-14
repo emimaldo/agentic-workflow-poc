@@ -57,6 +57,13 @@ namespace AgenticWorkflowPoC.Api.Services
 
             ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
 
+            // 0. A session id identifies one operation per tenant: reject reuse before spending any tokens.
+            var tenantId = _tenantAccessor.GetCurrentTenantId();
+            if (await _hitlSessionRepository.GetAsync(tenantId, sessionId, cancellationToken) is not null)
+            {
+                return SessionIdAlreadyUsed(sessionId);
+            }
+
             // 1. LLM as a pure parser, intercepted by the deterministic validator.
             var extraction = await _validator.ExtractAndValidateAsync(prompt, cancellationToken);
             if (!extraction.IsValid)
@@ -84,7 +91,7 @@ namespace AgenticWorkflowPoC.Api.Services
 
                 case TransferOutcomeKind.RequiresApproval when _hitlState is { IsSuspended: true, Context: { } context }:
                     // 3. Persist the immutable suspended context BEFORE releasing the HTTP thread with 202.
-                    await _hitlSessionRepository.CreatePendingAsync(
+                    var created = await _hitlSessionRepository.TryCreatePendingAsync(
                         new HitlSession(
                             sessionId,
                             command.TenantId,
@@ -93,6 +100,11 @@ namespace AgenticWorkflowPoC.Api.Services
                             HitlSessionStatus.PendingReview,
                             _timeProvider.GetUtcNow()),
                         cancellationToken);
+                    if (!created)
+                    {
+                        // A concurrent request with the same session id won the insert.
+                        return SessionIdAlreadyUsed(sessionId);
+                    }
 
                     _logger.LogWarning("Transfer suspended for SessionId={SessionId}: {Reason}", sessionId, _hitlState.Reason);
                     return new RoutingOutcome.Suspended(sessionId, command.TenantId, _hitlState.Reason);
@@ -101,6 +113,9 @@ namespace AgenticWorkflowPoC.Api.Services
                     throw new InvalidOperationException("The plugin required approval without setting the HITL state.");
             }
         }
+
+        private static RoutingOutcome.Rejected SessionIdAlreadyUsed(Guid sessionId) =>
+            new(sessionId, [new RoutingError("SessionIdAlreadyUsed", "This session id was already used; start a new session for a new transfer.")]);
 
         public async Task<ResumeOutcome> ResumeAsync(Guid sessionId, bool isApproved, CancellationToken cancellationToken = default)
         {

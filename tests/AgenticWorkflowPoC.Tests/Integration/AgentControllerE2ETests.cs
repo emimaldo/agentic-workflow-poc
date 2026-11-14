@@ -78,7 +78,7 @@ namespace AgenticWorkflowPoC.Tests.Integration
             await Task.Delay(100);
 
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
 
             var finalSession = await WaitForStatusAsync(scenario, sessionId, HitlSessionStatus.Completed, TimeSpan.FromSeconds(5));
 
@@ -112,7 +112,7 @@ namespace AgenticWorkflowPoC.Tests.Integration
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
             var factory = ApiFactory.Create(_factory, scenario);
             var tenantB = ApiFactory.CreateClient(factory, ApiFactory.AdminKeyB);
 
@@ -139,7 +139,7 @@ namespace AgenticWorkflowPoC.Tests.Integration
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
             var factory = ApiFactory.Create(_factory, scenario);
 
             var response = await ApiFactory.CreateClient(factory, ApiFactory.AdminKeyA).PostAsync(

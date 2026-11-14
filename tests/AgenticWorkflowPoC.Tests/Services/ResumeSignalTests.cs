@@ -13,7 +13,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
 
             await scenario.CreateAgentService().ResumeAsync(sessionId, true);
 
@@ -27,7 +27,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
             var service = scenario.CreateAgentService();
 
             await service.ResumeAsync(sessionId, false);

@@ -15,7 +15,7 @@ CREATE TABLE dbo.AgentSessions (
 GO
 
 CREATE TABLE dbo.HitlSessions (
-    SessionId UNIQUEIDENTIFIER PRIMARY KEY,
+    SessionId UNIQUEIDENTIFIER NOT NULL,
     TenantId NVARCHAR(100) NOT NULL,
     Reason NVARCHAR(500) NOT NULL,
     SerializedContext NVARCHAR(MAX) NOT NULL,
@@ -25,7 +25,9 @@ CREATE TABLE dbo.HitlSessions (
     ProcessingStartedAt DATETIMEOFFSET NULL,
     ResolvedBy NVARCHAR(200) NULL,
     ResolvedAt DATETIMEOFFSET NULL,
-    InvalidationReason NVARCHAR(200) NULL
+    InvalidationReason NVARCHAR(200) NULL,
+    -- Per-tenant key: session ids chosen by one tenant can never collide with another tenant's.
+    CONSTRAINT PK_HitlSessions PRIMARY KEY (TenantId, SessionId)
 );
 GO
 

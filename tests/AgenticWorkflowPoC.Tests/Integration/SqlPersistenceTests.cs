@@ -6,6 +6,7 @@ using AgenticWorkflowPoC.Infrastructure.Persistence;
 using AgenticWorkflowPoC.Plugins.Financial;
 using AgenticWorkflowPoC.Tests.Support;
 using Dapper;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace AgenticWorkflowPoC.Tests.Integration
@@ -137,7 +138,7 @@ namespace AgenticWorkflowPoC.Tests.Integration
             var tenant = NewTenant();
             var repository = new SqlHitlSessionRepository(_sql.Configuration);
             var sessionId = Guid.NewGuid();
-            await repository.CreatePendingAsync(Session(sessionId, tenant));
+            await repository.TryCreatePendingAsync(Session(sessionId, tenant));
 
             Assert.Null(await repository.GetAsync(NewTenant(), sessionId));
             Assert.False(await repository.TryResolveAsync(NewTenant(), sessionId, HitlSessionStatus.Approved, "intruder", Now));
@@ -159,7 +160,7 @@ namespace AgenticWorkflowPoC.Tests.Integration
             var tenant = NewTenant();
             var repository = new SqlHitlSessionRepository(_sql.Configuration);
             var sessionId = Guid.NewGuid();
-            await repository.CreatePendingAsync(Session(sessionId, tenant));
+            await repository.TryCreatePendingAsync(Session(sessionId, tenant));
             await repository.TryResolveAsync(tenant, sessionId, HitlSessionStatus.Approved, "op", Now);
 
             // Other approved sessions from earlier tests may also be claimable; collect only ours.
@@ -172,6 +173,56 @@ namespace AgenticWorkflowPoC.Tests.Integration
             Assert.Equal(HitlSessionStatus.Invalidated, stored?.Status);
             Assert.Equal("AccountFrozen: frozen", stored?.InvalidationReason);
             Assert.Equal(1, stored?.ExecutionAttempts);
+        }
+
+        [DockerFact]
+        public async Task HitlRepository_SameSessionIdInTwoTenants_DoesNotCollide_ButRepeatsWithinATenantDo()
+        {
+            var tenantA = NewTenant();
+            var tenantB = NewTenant();
+            var repository = new SqlHitlSessionRepository(_sql.Configuration);
+            var sharedId = Guid.NewGuid();
+
+            Assert.True(await repository.TryCreatePendingAsync(Session(sharedId, tenantA)));
+            Assert.True(await repository.TryCreatePendingAsync(Session(sharedId, tenantB)));
+            Assert.False(await repository.TryCreatePendingAsync(Session(sharedId, tenantA)));
+        }
+
+        [DockerFact]
+        public async Task Migrations_UpgradeALegacyDatabaseThrough001To005()
+        {
+            // An existing database created by the very first script, upgraded step by step.
+            var connectionString = await _sql.CreateDatabaseFromScriptsAsync(
+                "LegacyUpgrade",
+                "scripts/001-create-hitl-sessions.sql",
+                "scripts/002-hitl-tenant-and-work-queue.sql",
+                "scripts/003-fintech-ledger.sql",
+                "scripts/004-hitl-serialized-context.sql",
+                "scripts/005-hitl-tenant-scoped-key.sql",
+                "scripts/005-hitl-tenant-scoped-key.sql"); // idempotent re-run
+
+            await using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+            var keyColumns = await connection.QueryAsync<string>("""
+                SELECT c.name
+                FROM sys.key_constraints kc
+                JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id
+                JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                WHERE kc.parent_object_id = OBJECT_ID(N'dbo.HitlSessions') AND kc.type = 'PK'
+                ORDER BY ic.key_ordinal;
+                """);
+            var staffTableExists = await connection.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM sys.tables WHERE name = N'StaffAvailabilityOverrides';");
+
+            Assert.Equal(["TenantId", "SessionId"], keyColumns);
+            Assert.Equal(0, staffTableExists);
+
+            var repository = new SqlHitlSessionRepository(new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                .AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?> { ["ConnectionStrings:AgenticDatabase"] = connectionString })
+                .Build());
+            var sessionId = Guid.NewGuid();
+            Assert.True(await repository.TryCreatePendingAsync(Session(sessionId, "tenant-a")));
+            Assert.True(await repository.TryResolveAsync("tenant-a", sessionId, HitlSessionStatus.Approved, "op", Now));
+            Assert.Equal("op", (await repository.GetAsync("tenant-a", sessionId))?.ResolvedBy);
         }
 
         private static string NewTenant() => $"t-{Guid.NewGuid():N}";

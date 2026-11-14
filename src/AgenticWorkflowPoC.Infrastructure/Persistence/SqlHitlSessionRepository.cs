@@ -39,7 +39,7 @@ namespace AgenticWorkflowPoC.Infrastructure.Persistence
             return row?.ToEntity();
         }
 
-        public async Task CreatePendingAsync(HitlSession session, CancellationToken cancellationToken = default)
+        public async Task<bool> TryCreatePendingAsync(HitlSession session, CancellationToken cancellationToken = default)
         {
             const string sql = """
                 INSERT INTO dbo.HitlSessions
@@ -49,19 +49,30 @@ namespace AgenticWorkflowPoC.Infrastructure.Persistence
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
-            await connection.ExecuteAsync(new CommandDefinition(
-                sql,
-                new
-                {
-                    session.SessionId,
-                    session.TenantId,
-                    session.Reason,
-                    session.SerializedContext,
-                    Status = session.Status.ToString(),
-                    session.SuspendedAt
-                },
-                cancellationToken: cancellationToken));
+            try
+            {
+                await connection.ExecuteAsync(new CommandDefinition(
+                    sql,
+                    new
+                    {
+                        session.SessionId,
+                        session.TenantId,
+                        session.Reason,
+                        session.SerializedContext,
+                        Status = session.Status.ToString(),
+                        session.SuspendedAt
+                    },
+                    cancellationToken: cancellationToken));
+                return true;
+            }
+            catch (SqlException exception) when (exception.Number is DuplicateKey or DuplicateUniqueIndex)
+            {
+                return false;
+            }
         }
+
+        private const int DuplicateKey = 2627;
+        private const int DuplicateUniqueIndex = 2601;
 
         public async Task<bool> TryResolveAsync(
             string tenantId,

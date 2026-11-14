@@ -9,24 +9,20 @@ namespace AgenticWorkflowPoC.Api.Development
 {
     public sealed class InMemoryHitlSessionRepository : IHitlSessionRepository
     {
-        private readonly ConcurrentDictionary<Guid, HitlSession> _sessions = new();
+        // Keyed like the SQL primary key: (TenantId, SessionId).
+        private readonly ConcurrentDictionary<(string TenantId, Guid SessionId), HitlSession> _sessions = new();
 
         public Task<HitlSession?> GetAsync(string tenantId, Guid sessionId, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _sessions.TryGetValue(sessionId, out var session);
-            return Task.FromResult(session?.TenantId == tenantId ? session : null);
+            _sessions.TryGetValue((tenantId, sessionId), out var session);
+            return Task.FromResult(session);
         }
 
-        public Task CreatePendingAsync(HitlSession session, CancellationToken cancellationToken = default)
+        public Task<bool> TryCreatePendingAsync(HitlSession session, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_sessions.TryAdd(session.SessionId, session))
-            {
-                throw new InvalidOperationException($"HITL session {session.SessionId} already exists.");
-            }
-
-            return Task.CompletedTask;
+            return Task.FromResult(_sessions.TryAdd((session.TenantId, session.SessionId), session));
         }
 
         public Task<bool> TryResolveAsync(
@@ -76,14 +72,14 @@ namespace AgenticWorkflowPoC.Api.Development
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            while (_sessions.TryGetValue(sessionId, out var current))
+            while (_sessions.TryGetValue((tenantId, sessionId), out var current))
             {
-                if (current.TenantId != tenantId || current.Status != expectedStatus)
+                if (current.Status != expectedStatus)
                 {
                     return Task.FromResult(false);
                 }
 
-                if (_sessions.TryUpdate(sessionId, update(current), current))
+                if (_sessions.TryUpdate((tenantId, sessionId), update(current), current))
                 {
                     return Task.FromResult(true);
                 }
@@ -101,9 +97,9 @@ namespace AgenticWorkflowPoC.Api.Development
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            while (_sessions.TryGetValue(sessionId, out var current))
+            while (_sessions.TryGetValue((tenantId, sessionId), out var current))
             {
-                if (current.TenantId != tenantId || current.Status != expectedStatus)
+                if (current.Status != expectedStatus)
                 {
                     return Task.FromResult(false);
                 }
@@ -113,7 +109,7 @@ namespace AgenticWorkflowPoC.Api.Development
                     Status = newStatus,
                     ProcessingStartedAt = newStatus == HitlSessionStatus.Processing ? current.ProcessingStartedAt : null
                 };
-                if (_sessions.TryUpdate(sessionId, updated, current))
+                if (_sessions.TryUpdate((tenantId, sessionId), updated, current))
                 {
                     return Task.FromResult(true);
                 }

@@ -106,7 +106,8 @@ SQL Server (durable mode)
 -------------------------
 - Fresh database: run `schema.sql`, then `scripts/seed-dev.sql` for dev data.
 - Upgrading an existing database: apply `scripts/002-…`, `scripts/003-fintech-ledger.sql` (creates the ledger, drops the
-  former staff demo table) and `scripts/004-hitl-serialized-context.sql`, in order. All are idempotent.
+  former staff demo table), `scripts/004-hitl-serialized-context.sql` and `scripts/005-hitl-tenant-scoped-key.sql`
+  (HITL key becomes `(TenantId, SessionId)`), in order. All are idempotent.
 - Configure `ConnectionStrings:AgenticDatabase`, `TenantPolicies:{tenantId}:*` and the API keys outside source control.
 
 Configuration reference

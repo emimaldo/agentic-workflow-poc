@@ -74,7 +74,7 @@ namespace AgenticWorkflowPoC.Tests.Support
             await using (var master = new SqlConnection(_container.GetConnectionString()))
             {
                 await master.OpenAsync();
-                foreach (var script in new[] { "schema.sql", "scripts/003-fintech-ledger.sql", "scripts/004-hitl-serialized-context.sql" })
+                foreach (var script in new[] { "schema.sql", "scripts/003-fintech-ledger.sql", "scripts/004-hitl-serialized-context.sql", "scripts/005-hitl-tenant-scoped-key.sql" })
                 {
                     await ExecuteScriptAsync(master, script);
                 }
@@ -121,9 +121,34 @@ namespace AgenticWorkflowPoC.Tests.Support
                 new { tenantId, accountId });
         }
 
-        private static async Task ExecuteScriptAsync(SqlConnection connection, string relativePath)
+        /// <summary>
+        /// Creates <paramref name="database"/> and applies <paramref name="scripts"/> to it in order
+        /// (the scripts' <c>USE AgenticPoC</c> is redirected), returning its connection string.
+        /// Used to test the upgrade path of an existing, non-fresh database.
+        /// </summary>
+        public async Task<string> CreateDatabaseFromScriptsAsync(string database, params string[] scripts)
+        {
+            await using (var master = new SqlConnection(_container!.GetConnectionString()))
+            {
+                await master.OpenAsync();
+                await master.ExecuteAsync($"CREATE DATABASE [{database}];");
+                foreach (var script in scripts)
+                {
+                    await ExecuteScriptAsync(master, script, database);
+                }
+            }
+
+            return new SqlConnectionStringBuilder(_container.GetConnectionString()) { InitialCatalog = database }.ConnectionString;
+        }
+
+        private static async Task ExecuteScriptAsync(SqlConnection connection, string relativePath, string? targetDatabase = null)
         {
             var sql = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), relativePath));
+            if (targetDatabase is not null)
+            {
+                sql = sql.Replace("USE AgenticPoC;", $"USE [{targetDatabase}];", StringComparison.Ordinal);
+            }
+
             foreach (var batch in GoSeparator().Split(sql).Where(b => !string.IsNullOrWhiteSpace(b)))
             {
                 await connection.ExecuteAsync(batch);

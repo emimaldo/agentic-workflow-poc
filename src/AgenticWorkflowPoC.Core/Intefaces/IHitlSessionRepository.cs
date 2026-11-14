@@ -9,7 +9,11 @@ namespace AgenticWorkflowPoC.Core.Interfaces
     {
         Task<HitlSession?> GetAsync(string tenantId, Guid sessionId, CancellationToken cancellationToken = default);
 
-        Task CreatePendingAsync(HitlSession session, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Persists a new PendingReview session. Returns false when the tenant already has a session
+        /// with this id (the primary key is (TenantId, SessionId), so ids never collide across tenants).
+        /// </summary>
+        Task<bool> TryCreatePendingAsync(HitlSession session, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Atomically records an operator decision (PendingReview → Approved | Rejected) with audit data.

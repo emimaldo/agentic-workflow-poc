@@ -71,11 +71,38 @@ namespace AgenticWorkflowPoC.Tests.Services
         }
 
         [Fact]
+        public async Task InvokeAsync_WithASessionIdAlreadyUsedByTheTenant_IsRejectedBeforeInference()
+        {
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
+
+            var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
+
+            Assert.Equal("SessionIdAlreadyUsed", Assert.Single(Assert.IsType<RoutingOutcome.Rejected>(response).Errors).Code);
+            Assert.Equal(0, scenario.Chat.CallCount);
+        }
+
+        [Fact]
+        public async Task InvokeAsync_SameSessionIdInAnotherTenant_SuspendsIndependently()
+        {
+            var sessionId = Guid.NewGuid();
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, tenantId: TransferScenario.TenantB));
+
+            var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
+
+            Assert.IsType<RoutingOutcome.Suspended>(response);
+            Assert.NotNull(await scenario.Repository.GetAsync(TenantA, sessionId));
+            Assert.NotNull(await scenario.Repository.GetAsync(TransferScenario.TenantB, sessionId));
+        }
+
+        [Fact]
         public async Task ResumeAsync_WhenApproved_QueuesAndWorkerExecutesWithoutCallingModel()
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
 
             var response = await scenario.CreateAgentService().ResumeAsync(sessionId, true);
 
@@ -95,7 +122,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
 
             var response = await scenario.CreateAgentService().ResumeAsync(sessionId, false);
 
@@ -119,7 +146,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
             var service = scenario.CreateAgentService();
 
             await service.ResumeAsync(sessionId, false);
@@ -133,7 +160,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var scenario = new TransferScenario(tenantId: TransferScenario.TenantB);
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId, tenantId: TenantA));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, tenantId: TenantA));
 
             var response = await scenario.CreateAgentService().ResumeAsync(sessionId, true);
 
@@ -161,7 +188,7 @@ namespace AgenticWorkflowPoC.Tests.Services
             var scenario = new TransferScenario();
             scenario.Tenant.SubjectId = "ops-admin-7";
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
 
             await scenario.CreateAgentService().ResumeAsync(sessionId, true);
 
@@ -179,7 +206,7 @@ namespace AgenticWorkflowPoC.Tests.Services
             {
                 SerializedContext = JsonSerializer.Serialize(TransferScenario.Command(12_500m, tenantId: TransferScenario.TenantB))
             };
-            await scenario.Repository.CreatePendingAsync(tampered);
+            await scenario.Repository.TryCreatePendingAsync(tampered);
 
             Assert.True(await scenario.CreateProcessor().ProcessNextAsync());
 
@@ -192,7 +219,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
 
             // A previous worker claimed the session, debited the account, and crashed before completing it.
             var staleClaim = await scenario.Repository.TryClaimNextApprovedAsync(
@@ -216,7 +243,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         public async Task TryClaimNextApprovedAsync_ConcurrentWorkersOnlyClaimOneSession()
         {
             var scenario = new TransferScenario();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(Guid.NewGuid(), status: HitlSessionStatus.Approved));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(Guid.NewGuid(), status: HitlSessionStatus.Approved));
 
             var now = scenario.Time.GetUtcNow();
             var claims = await Task.WhenAll(
@@ -231,7 +258,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
             var executor = new FailingTransferExecutor();
             var processor = scenario.CreateProcessor(executor);
 
@@ -256,7 +283,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
             var flaky = new FlakyTransferExecutor(scenario.Ledger, failures: 1);
             var processor = scenario.CreateProcessor(flaky);
 
