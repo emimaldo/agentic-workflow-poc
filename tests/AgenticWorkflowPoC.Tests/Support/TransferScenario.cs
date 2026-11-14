@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Threading.Channels;
 using AgenticWorkflowPoC.Api.Development;
 using AgenticWorkflowPoC.Api.Security;
 using AgenticWorkflowPoC.Api.Services;
@@ -70,6 +71,7 @@ namespace AgenticWorkflowPoC.Tests.Support
         public ManualTimeProvider Time { get; } = new(new DateTimeOffset(2026, 11, 14, 10, 0, 0, TimeSpan.Zero));
         public StaticTenantPolicyProvider Policies { get; } = new();
         public FixedTenantAccessor Tenant { get; }
+        public Channel<ResumedWorkflowEvent> ResumeSignals { get; } = ResumeSignalChannel.Create(capacity: 16);
 
         public TenantPolicy PolicyA => Policies.Policies[TenantA];
 
@@ -101,6 +103,7 @@ namespace AgenticWorkflowPoC.Tests.Support
                 Hitl,
                 Repository,
                 Tenant,
+                ResumeSignals.Writer,
                 Time,
                 NullLogger<AgentService>.Instance);
 

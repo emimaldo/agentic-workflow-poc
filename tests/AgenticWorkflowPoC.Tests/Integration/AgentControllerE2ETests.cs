@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
@@ -51,7 +52,8 @@ namespace AgenticWorkflowPoC.Tests.Integration
             Assert.Equal(HttpStatusCode.Accepted, resume.StatusCode);
             Assert.Equal(sessionPath, resume.Headers.Location?.AbsolutePath);
 
-            // 3. Background execution, no further inference.
+            // 3. Background execution, no further inference. The sweep is 60 s in these tests,
+            //    so completing within the timeout proves the channel signal woke the worker.
             var finalSession = await WaitForStatusAsync(scenario, sessionId, HitlSessionStatus.Completed, TimeSpan.FromSeconds(5));
             Assert.Equal(HitlSessionStatus.Completed, finalSession?.Status);
             Assert.Equal(1, scenario.Ledger.ExecutedCount);
@@ -60,6 +62,27 @@ namespace AgenticWorkflowPoC.Tests.Integration
 
             var second = await admin.PostAsJsonAsync($"{sessionPath}/resume", new { IsApproved = true });
             Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        }
+
+        [Fact]
+        public async Task ApprovedSessionWithoutSignal_IsRecoveredBySweep()
+        {
+            // Simulates a lost signal: the approval is in the durable store but nothing was enqueued.
+            var scenario = new TransferScenario();
+            var factory = ApiFactory.Create(_factory, scenario, new Dictionary<string, string?>
+            {
+                ["HitlWorker:SweepInterval"] = "00:00:00.200"
+            });
+            _ = factory.Server; // start the host; the worker drains the (empty) queue and starts waiting
+            await Task.Delay(100);
+
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+
+            var finalSession = await WaitForStatusAsync(scenario, sessionId, HitlSessionStatus.Completed, TimeSpan.FromSeconds(5));
+
+            Assert.Equal(HitlSessionStatus.Completed, finalSession?.Status);
+            Assert.Equal(1, scenario.Ledger.ExecutedCount);
         }
 
         [Fact]

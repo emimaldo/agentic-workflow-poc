@@ -32,6 +32,8 @@ namespace AgenticWorkflowPoC.Tests.Support
                     var settings = new Dictionary<string, string?>
                     {
                         ["USE_FAKE_CHAT"] = "true",
+                        // Long sweep: E2E tests prove the resume signal wakes the worker immediately.
+                        ["HitlWorker:SweepInterval"] = "00:01:00",
                         ["Authentication:ApiKeys:0:Key"] = AdminKeyA,
                         ["Authentication:ApiKeys:0:TenantId"] = TransferScenario.TenantA,
                         ["Authentication:ApiKeys:0:Role"] = "Admin",

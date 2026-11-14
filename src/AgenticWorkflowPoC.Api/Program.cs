@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Threading.Channels;
 using AgenticWorkflowPoC.Api.Configuration;
 using AgenticWorkflowPoC.Api.Development;
 using AgenticWorkflowPoC.Api.Security;
@@ -9,6 +10,7 @@ using AgenticWorkflowPoC.Plugins.Financial;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder( args );
 
@@ -23,6 +25,14 @@ builder.Services.AddScoped<IHitlSessionRepository, SqlHitlSessionRepository>();
 builder.Services.AddScoped<ILedgerReader, SqlLedgerReader>();
 builder.Services.AddScoped<ITransferExecutor, SqlTransferExecutor>();
 builder.Services.AddHostedService<HitlSessionWorker>();
+
+// HITL resume signals (Chapter 3): bounded channel used only as a wake-up trigger after the
+// approval has been committed to SQL.
+builder.Services.Configure<HitlWorkerOptions>(builder.Configuration.GetSection(HitlWorkerOptions.SectionName));
+builder.Services.AddSingleton(sp =>
+    ResumeSignalChannel.Create(sp.GetRequiredService<IOptions<HitlWorkerOptions>>().Value.ChannelCapacity));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<Channel<ResumedWorkflowEvent>>().Reader);
+builder.Services.AddSingleton(sp => sp.GetRequiredService<Channel<ResumedWorkflowEvent>>().Writer);
 
 builder.Services
     .AddAuthentication(ApiKeyAuthenticationHandler.SchemeName)

@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using AgenticWorkflowPoC.Api.Models;
 using AgenticWorkflowPoC.Api.Security;
@@ -23,6 +24,7 @@ namespace AgenticWorkflowPoC.Api.Services
         private readonly IHitlState _hitlState;
         private readonly IHitlSessionRepository _hitlSessionRepository;
         private readonly ITenantAccessor _tenantAccessor;
+        private readonly ChannelWriter<ResumedWorkflowEvent> _resumeSignals;
         private readonly TimeProvider _timeProvider;
         private readonly ILogger<AgentService> _logger;
 
@@ -32,6 +34,7 @@ namespace AgenticWorkflowPoC.Api.Services
             IHitlState hitlState,
             IHitlSessionRepository hitlSessionRepository,
             ITenantAccessor tenantAccessor,
+            ChannelWriter<ResumedWorkflowEvent> resumeSignals,
             TimeProvider timeProvider,
             ILogger<AgentService> logger)
         {
@@ -40,6 +43,7 @@ namespace AgenticWorkflowPoC.Api.Services
             _hitlState = hitlState;
             _hitlSessionRepository = hitlSessionRepository;
             _tenantAccessor = tenantAccessor;
+            _resumeSignals = resumeSignals;
             _timeProvider = timeProvider;
             _logger = logger;
         }
@@ -130,9 +134,15 @@ namespace AgenticWorkflowPoC.Api.Services
                 return new ResumeOutcome.AlreadyResolved(sessionId, current?.Status ?? resolvedStatus);
             }
 
-            return isApproved
-                ? new ResumeOutcome.Queued(sessionId, tenantId)
-                : new ResumeOutcome.RejectedByOperator(sessionId);
+            if (!isApproved)
+            {
+                return new ResumeOutcome.RejectedByOperator(sessionId);
+            }
+
+            // SQL first, signal second. If this write is lost (crash, cancelled request), the worker's
+            // periodic sweep still picks the approved session up from the durable queue.
+            await _resumeSignals.WriteAsync(new ResumedWorkflowEvent(tenantId, sessionId), cancellationToken);
+            return new ResumeOutcome.Queued(sessionId, tenantId);
         }
     }
 }
