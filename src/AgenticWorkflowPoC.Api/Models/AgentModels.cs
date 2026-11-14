@@ -4,5 +4,7 @@ namespace AgenticWorkflowPoC.Api.Models
 {
     public record AgentRequest(Guid SessionId, string Prompt);
     public record ResumeRequest(bool IsApproved);
-    public record AgentResponse(string Status, string? Message = null, string? SessionId = null, string? Response = null);
+
+    /// <summary>Response body for 200/202 outcomes. Never contains the serialized context.</summary>
+    public sealed record SessionResponse(Guid SessionId, string Status, string Message);
 }

@@ -6,7 +6,6 @@ using AgenticWorkflowPoC.Api.Development;
 using AgenticWorkflowPoC.Api.Models;
 using AgenticWorkflowPoC.Tests.Support;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace AgenticWorkflowPoC.Tests.Controllers
@@ -17,7 +16,7 @@ namespace AgenticWorkflowPoC.Tests.Controllers
         public async Task InvokeAgent_WhenTransferExceedsThreshold_ReturnsAccepted()
         {
             var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
-            var controller = new AgentController(scenario.CreateAgentService(), NullLogger<AgentController>.Instance);
+            var controller = new AgentController(scenario.CreateAgentService());
 
             var result = await controller.InvokeAgent(
                 new AgentRequest(Guid.NewGuid(), FakeChatClient.HighValueIntent),

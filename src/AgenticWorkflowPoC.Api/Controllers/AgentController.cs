@@ -1,59 +1,97 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Security.Claims;
+using AgenticWorkflowPoC.Api.Models;
+using AgenticWorkflowPoC.Api.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AgenticWorkflowPoC.Api.Controllers
 {
     [ApiController]
-    [Route( "api/[controller]" )]
+    [Route("api/[controller]")]
     [Authorize]
     public class AgentController : ControllerBase
     {
-        private readonly AgenticWorkflowPoC.Api.Services.IAgentService _agentService;
-        private readonly Microsoft.Extensions.Logging.ILogger<AgentController> _logger;
-        // HITL state and pending actions are managed by the service layer.
+        internal const int MaxPromptLength = 2000;
 
-        public AgentController( AgenticWorkflowPoC.Api.Services.IAgentService agentService, Microsoft.Extensions.Logging.ILogger<AgentController> logger )
+        private readonly IAgentService _agentService;
+
+        public AgentController(IAgentService agentService)
         {
             _agentService = agentService;
-            _logger = logger;
         }
 
-
-        [HttpPost( "invoke" )]
-        public async Task<IActionResult> InvokeAgent( [FromBody] AgenticWorkflowPoC.Api.Models.AgentRequest request, CancellationToken cancellationToken )
+        [HttpPost("invoke")]
+        public async Task<IActionResult> InvokeAgent([FromBody] AgentRequest request, CancellationToken cancellationToken)
         {
-            var response = await _agentService.InvokeAsync(request.SessionId, request.Prompt, cancellationToken);
-
-            if (response.Status == "Suspended")
+            if (request.SessionId == Guid.Empty
+                || string.IsNullOrWhiteSpace(request.Prompt)
+                || request.Prompt.Length > MaxPromptLength)
             {
-                return Accepted(response);
+                ModelState.AddModelError(nameof(request.Prompt), $"A session id and a prompt of at most {MaxPromptLength} characters are required.");
+                return ValidationProblem(ModelState);
             }
 
-            if (response.Status == "Error")
-            {
-                return BadRequest(new { error = response.Message });
-            }
+            var outcome = await _agentService.InvokeAsync(request.SessionId, request.Prompt, cancellationToken);
 
-            return Ok(response);
+            // Closed routing: every outcome maps to exactly one status code.
+            return outcome switch
+            {
+                RoutingOutcome.Completed completed =>
+                    Ok(new SessionResponse(completed.SessionId, "Completed", completed.Message)),
+                RoutingOutcome.Suspended suspended =>
+                    Accepted(new SessionResponse(suspended.SessionId, "Suspended", suspended.Reason)),
+                RoutingOutcome.Rejected rejected =>
+                    UnprocessableProblem(rejected),
+                _ => throw new UnreachableException()
+            };
         }
 
         [Authorize(Roles = "Admin")]
-        [HttpPost( "resume/{sessionId}" )]
-        public async Task<IActionResult> ResumeAgent( Guid sessionId, [FromBody] AgenticWorkflowPoC.Api.Models.ResumeRequest request, CancellationToken cancellationToken )
+        [HttpPost("resume/{sessionId}")]
+        public async Task<IActionResult> ResumeAgent(Guid sessionId, [FromBody] ResumeRequest request, CancellationToken cancellationToken)
         {
-            var response = await _agentService.ResumeAsync(sessionId, request.IsApproved, cancellationToken);
+            var outcome = await _agentService.ResumeAsync(sessionId, request.IsApproved, cancellationToken);
 
-            return response.Status switch
+            return outcome switch
             {
-                "NotFound" => NotFound(response),
-                "Conflict" => Conflict(response),
-                "Error" => BadRequest(response),
-                "Queued" => Accepted(response),
-                _ => Ok(response)
+                ResumeOutcome.Queued queued =>
+                    Accepted(new SessionResponse(queued.SessionId, "Queued", "The approved transfer was queued for background processing.")),
+                ResumeOutcome.RejectedByOperator rejected =>
+                    Ok(new SessionResponse(rejected.SessionId, "Rejected", "The pending transfer was rejected.")),
+                ResumeOutcome.NotFound =>
+                    NotFound(),
+                ResumeOutcome.AlreadyResolved resolved =>
+                    Problem(
+                        statusCode: StatusCodes.Status409Conflict,
+                        title: "The HITL session has already been resolved.",
+                        detail: $"Current status: {resolved.CurrentStatus}."),
+                _ => throw new UnreachableException()
+            };
+        }
+
+        private ObjectResult UnprocessableProblem(RoutingOutcome.Rejected rejected)
+        {
+            var problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = "The request was rejected by deterministic validation.",
+                Type = "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.21",
+                Extensions =
+                {
+                    ["sessionId"] = rejected.SessionId,
+                    ["errors"] = rejected.Errors
+                }
+            };
+
+            return new ObjectResult(problem)
+            {
+                StatusCode = StatusCodes.Status422UnprocessableEntity,
+                ContentTypes = { "application/problem+json" }
             };
         }
     }

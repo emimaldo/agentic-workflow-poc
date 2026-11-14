@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using AgenticWorkflowPoC.Api.Development;
+using AgenticWorkflowPoC.Api.Models;
 using AgenticWorkflowPoC.Core.Entities;
 using AgenticWorkflowPoC.Plugins.Financial;
 using AgenticWorkflowPoC.Tests.Support;
@@ -21,7 +22,7 @@ namespace AgenticWorkflowPoC.Tests.Services
 
             var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
 
-            Assert.Equal("Suspended", response.Status);
+            Assert.IsType<RoutingOutcome.Suspended>(response);
             var session = await scenario.Repository.GetAsync(TenantA, sessionId);
             Assert.Equal(HitlSessionStatus.PendingReview, session?.Status);
             Assert.Equal(TenantA, session?.TenantId);
@@ -36,7 +37,7 @@ namespace AgenticWorkflowPoC.Tests.Services
 
             var response = await scenario.CreateAgentService().InvokeAsync(Guid.NewGuid(), FakeChatClient.LowValueIntent);
 
-            Assert.Equal("Completed", response.Status);
+            Assert.IsType<RoutingOutcome.Completed>(response);
             Assert.Equal(1, scenario.Ledger.ExecutedCount);
         }
 
@@ -49,7 +50,7 @@ namespace AgenticWorkflowPoC.Tests.Services
 
             var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.LowValueIntent);
 
-            Assert.Equal("Error", response.Status);
+            Assert.Equal("SchemaViolation", Assert.Single(Assert.IsType<RoutingOutcome.Rejected>(response).Errors).Code);
             Assert.Null(await scenario.Repository.GetAsync(TenantA, sessionId));
             Assert.Equal(0, scenario.Ledger.ExecutedCount);
         }
@@ -63,7 +64,7 @@ namespace AgenticWorkflowPoC.Tests.Services
 
             var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
 
-            Assert.Equal("Error", response.Status);
+            Assert.Equal("InsufficientFunds", Assert.Single(Assert.IsType<RoutingOutcome.Rejected>(response).Errors).Code);
             Assert.Null(await scenario.Repository.GetAsync(TenantA, sessionId));
             Assert.Equal(0, scenario.Ledger.ExecutedCount);
         }
@@ -77,7 +78,7 @@ namespace AgenticWorkflowPoC.Tests.Services
 
             var response = await scenario.CreateAgentService().ResumeAsync(sessionId, true);
 
-            Assert.Equal("Queued", response.Status);
+            Assert.IsType<ResumeOutcome.Queued>(response);
             Assert.Equal(HitlSessionStatus.Approved, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
             Assert.Equal(0, scenario.Ledger.ExecutedCount);
 
@@ -97,7 +98,7 @@ namespace AgenticWorkflowPoC.Tests.Services
 
             var response = await scenario.CreateAgentService().ResumeAsync(sessionId, false);
 
-            Assert.Equal("Rejected", response.Status);
+            Assert.IsType<ResumeOutcome.RejectedByOperator>(response);
             Assert.Equal(HitlSessionStatus.Rejected, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
             Assert.False(await scenario.CreateProcessor().ProcessNextAsync());
             Assert.Equal(0, scenario.Chat.CallCount);
@@ -109,7 +110,7 @@ namespace AgenticWorkflowPoC.Tests.Services
         {
             var response = await new TransferScenario().CreateAgentService().ResumeAsync(Guid.NewGuid(), true);
 
-            Assert.Equal("NotFound", response.Status);
+            Assert.IsType<ResumeOutcome.NotFound>(response);
         }
 
         [Fact]
@@ -123,7 +124,7 @@ namespace AgenticWorkflowPoC.Tests.Services
             await service.ResumeAsync(sessionId, false);
             var secondResponse = await service.ResumeAsync(sessionId, true);
 
-            Assert.Equal("Conflict", secondResponse.Status);
+            Assert.Equal(HitlSessionStatus.Rejected, Assert.IsType<ResumeOutcome.AlreadyResolved>(secondResponse).CurrentStatus);
         }
 
         [Fact]
@@ -135,7 +136,7 @@ namespace AgenticWorkflowPoC.Tests.Services
 
             var response = await scenario.CreateAgentService().ResumeAsync(sessionId, true);
 
-            Assert.Equal("NotFound", response.Status);
+            Assert.IsType<ResumeOutcome.NotFound>(response);
             Assert.Equal(HitlSessionStatus.PendingReview, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
         }
 

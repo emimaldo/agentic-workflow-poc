@@ -13,6 +13,9 @@ using Microsoft.Extensions.Logging;
 
 namespace AgenticWorkflowPoC.Api.Services
 {
+    /// <summary>
+    /// Deterministic router: LLM extraction → validation → C# domain plugin → closed outcome.
+    /// </summary>
     public class AgentService : IAgentService
     {
         private readonly IExtractionValidator<EnrichedTransferCommand> _validator;
@@ -41,19 +44,22 @@ namespace AgenticWorkflowPoC.Api.Services
             _logger = logger;
         }
 
-        public async Task<AgentResponse> InvokeAsync(Guid sessionId, string prompt, CancellationToken cancellationToken = default)
+        public async Task<RoutingOutcome> InvokeAsync(Guid sessionId, string prompt, CancellationToken cancellationToken = default)
         {
-            if (sessionId == Guid.Empty || string.IsNullOrWhiteSpace(prompt))
+            if (sessionId == Guid.Empty)
             {
-                return new AgentResponse("Error", "A session and prompt are required.", sessionId.ToString());
+                throw new ArgumentException("A non-empty session id is required.", nameof(sessionId));
             }
+
+            ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
 
             // 1. LLM as a pure parser, intercepted by the deterministic validator.
             var extraction = await _validator.ExtractAndValidateAsync(prompt, cancellationToken);
             if (!extraction.IsValid)
             {
-                var message = string.Join(" ", extraction.Errors.Select(e => e.Message));
-                return new AgentResponse("Error", message, sessionId.ToString());
+                return new RoutingOutcome.Rejected(
+                    sessionId,
+                    [.. extraction.Errors.Select(e => new RoutingError(e.Code.ToString(), e.Message))]);
             }
 
             var command = extraction.Data;
@@ -65,10 +71,12 @@ namespace AgenticWorkflowPoC.Api.Services
             {
                 case TransferOutcomeKind.Completed:
                     _logger.LogInformation("Transfer completed for SessionId={SessionId}", sessionId);
-                    return new AgentResponse("Completed", Response: outcome.Message, SessionId: sessionId.ToString());
+                    return new RoutingOutcome.Completed(sessionId, outcome.Message);
 
                 case TransferOutcomeKind.Rejected:
-                    return new AgentResponse("Error", outcome.Message, sessionId.ToString());
+                    return new RoutingOutcome.Rejected(
+                        sessionId,
+                        [new RoutingError(outcome.RejectionCode?.ToString() ?? "DomainRejected", outcome.Message)]);
 
                 case TransferOutcomeKind.RequiresApproval when _hitlState.IsSuspended:
                     // 3. Persist the suspended context BEFORE releasing the HTTP thread with 202.
@@ -83,28 +91,30 @@ namespace AgenticWorkflowPoC.Api.Services
                         cancellationToken);
 
                     _logger.LogWarning("Transfer suspended for SessionId={SessionId}: {Reason}", sessionId, _hitlState.Reason);
-                    return new AgentResponse("Suspended", _hitlState.Reason, sessionId.ToString());
+                    return new RoutingOutcome.Suspended(sessionId, _hitlState.Reason);
 
                 default:
                     throw new InvalidOperationException("The plugin required approval without setting the HITL state.");
             }
         }
 
-        public async Task<AgentResponse> ResumeAsync(Guid sessionId, bool isApproved, CancellationToken cancellationToken = default)
+        public async Task<ResumeOutcome> ResumeAsync(Guid sessionId, bool isApproved, CancellationToken cancellationToken = default)
         {
             var tenantId = _tenantAccessor.GetCurrentTenantId();
 
             var pendingSession = await _hitlSessionRepository.GetAsync(tenantId, sessionId, cancellationToken);
             if (pendingSession is null)
             {
-                return new AgentResponse("NotFound", "HITL session was not found.", sessionId.ToString());
+                return new ResumeOutcome.NotFound(sessionId);
             }
 
             if (pendingSession.Status != HitlSessionStatus.PendingReview)
             {
-                return new AgentResponse("Conflict", $"HITL session is already {pendingSession.Status}.", sessionId.ToString());
+                return new ResumeOutcome.AlreadyResolved(sessionId, pendingSession.Status);
             }
 
+            // The resume signal is a hint, not an authorization: the state transition is persisted
+            // atomically (compare-and-set) and execution happens later, after re-evaluation.
             var resolvedStatus = isApproved ? HitlSessionStatus.Approved : HitlSessionStatus.Rejected;
             var transitioned = await _hitlSessionRepository.TryTransitionAsync(
                 tenantId,
@@ -115,12 +125,13 @@ namespace AgenticWorkflowPoC.Api.Services
 
             if (!transitioned)
             {
-                return new AgentResponse("Conflict", "HITL session has already been resolved.", sessionId.ToString());
+                var current = await _hitlSessionRepository.GetAsync(tenantId, sessionId, cancellationToken);
+                return new ResumeOutcome.AlreadyResolved(sessionId, current?.Status ?? resolvedStatus);
             }
 
             return isApproved
-                ? new AgentResponse("Queued", "The approved transfer was queued for background processing.", sessionId.ToString())
-                : new AgentResponse("Rejected", "The pending transfer was rejected.", sessionId.ToString());
+                ? new ResumeOutcome.Queued(sessionId)
+                : new ResumeOutcome.RejectedByOperator(sessionId);
         }
     }
 }
