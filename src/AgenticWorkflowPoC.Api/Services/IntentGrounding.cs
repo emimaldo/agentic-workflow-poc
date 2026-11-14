@@ -96,7 +96,10 @@ namespace AgenticWorkflowPoC.Api.Services
                 ? [value]
                 : [];
 
-        [GeneratedRegex(@"\d+(?:[.,'   ]\d+)*", RegexOptions.CultureInvariant)]
+        // '.' and ',' may join any digit group (decimal or thousands). Whitespace and apostrophes only
+        // join a group of exactly three digits (thousands grouping: "12 500", "1'000"), so adjacent
+        // numbers such as IBAN blocks followed by an amount ("... 0130 00 250 EUR") are not merged.
+        [GeneratedRegex(@"\d+(?:[.,]\d+|['\u00A0\u202F ]\d{3}(?!\d))*", RegexOptions.CultureInvariant)]
         private static partial Regex NumericLiteral();
 
         [GeneratedRegex(@"['   ]", RegexOptions.CultureInvariant)]

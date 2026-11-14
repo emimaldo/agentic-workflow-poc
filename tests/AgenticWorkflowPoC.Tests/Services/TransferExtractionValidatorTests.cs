@@ -164,6 +164,20 @@ namespace AgenticWorkflowPoC.Tests.Services
             Assert.Equal(12_500m, result.Data.Amount);
         }
 
+        [Theory]
+        [InlineData("Transfer to DE89 3704 0044 0532 0130 00 250.00 EUR")]
+        [InlineData("Transfer to DE89 3704 0044 0532 0130 00 250 EUR")]
+        [InlineData("Pay 250,00 EUR on 2026 11 14 to DE89 3704 0044 0532 0130 00")]
+        public async Task ExtractAndValidate_AmountNextToOtherNumbers_IsStillGrounded(string intent)
+        {
+            var scenario = new TransferScenario(FakeChatClient.LowValueTransfer());
+
+            var result = await scenario.CreateValidator().ExtractAndValidateAsync(intent);
+
+            Assert.True(result.IsValid, string.Join("; ", result.Errors));
+            Assert.Equal(250m, result.Data.Amount);
+        }
+
         // ---- Layer 4: tenant limits -----------------------------------------------------
 
         [Fact]
