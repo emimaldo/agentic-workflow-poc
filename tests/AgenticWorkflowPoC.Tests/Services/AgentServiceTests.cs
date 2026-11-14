@@ -235,12 +235,47 @@ namespace AgenticWorkflowPoC.Tests.Services
             var executor = new FailingTransferExecutor();
             var processor = scenario.CreateProcessor(executor);
 
+            // Attempt 1 fails: no hot retry while the processing lease is still active.
             Assert.True(await processor.ProcessNextAsync());
+            Assert.False(await processor.ProcessNextAsync());
+            Assert.Equal(1, executor.CallCount);
+            Assert.Equal(HitlSessionStatus.Processing, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+
+            // Each retry happens only after the lease expires (backoff), up to three attempts.
+            scenario.Time.Now += TimeSpan.FromMinutes(3);
             Assert.True(await processor.ProcessNextAsync());
+            scenario.Time.Now += TimeSpan.FromMinutes(3);
             Assert.True(await processor.ProcessNextAsync());
 
             Assert.Equal(3, executor.CallCount);
             Assert.Equal(HitlSessionStatus.Failed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+        }
+
+        [Fact]
+        public async Task ProcessNextAsync_WhenTransientFailureClears_RetrySucceedsAfterBackoff()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+            var flaky = new FlakyTransferExecutor(scenario.Ledger, failures: 1);
+            var processor = scenario.CreateProcessor(flaky);
+
+            Assert.True(await processor.ProcessNextAsync());
+            scenario.Time.Now += TimeSpan.FromMinutes(3);
+            Assert.True(await processor.ProcessNextAsync());
+
+            Assert.Equal(HitlSessionStatus.Completed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.Equal(1, scenario.Ledger.ExecutedCount);
+        }
+
+        private sealed class FlakyTransferExecutor(ITransferExecutor inner, int failures) : ITransferExecutor
+        {
+            private int _remainingFailures = failures;
+
+            public Task<TransferExecutionStatus> ExecuteAsync(TransferExecutionRequest request, CancellationToken cancellationToken = default) =>
+                _remainingFailures-- > 0
+                    ? throw new InvalidOperationException("Simulated transient SQL failure.")
+                    : inner.ExecuteAsync(request, cancellationToken);
         }
 
         private sealed class FailingTransferExecutor : ITransferExecutor

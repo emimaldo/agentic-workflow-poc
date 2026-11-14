@@ -101,11 +101,23 @@ namespace AgenticWorkflowPoC.Api.Services
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Failed to process approved HITL session {SessionId}.", session.SessionId);
-                var retryStatus = session.ExecutionAttempts >= MaxAttempts
-                    ? HitlSessionStatus.Failed
-                    : HitlSessionStatus.Approved;
-                await TransitionAsync(session, retryStatus, cancellationToken);
+                _logger.LogError(
+                    exception,
+                    "Attempt {Attempt}/{MaxAttempts} failed for approved HITL session {SessionId}.",
+                    session.ExecutionAttempts,
+                    MaxAttempts,
+                    session.SessionId);
+
+                if (session.ExecutionAttempts >= MaxAttempts)
+                {
+                    await TransitionAsync(session, HitlSessionStatus.Failed, cancellationToken);
+                    return true;
+                }
+
+                // Backoff: leave the session in Processing. It is retried only after its lease expires
+                // and the worker's sweep reclaims it, so a transient outage (failover, deadlock, network
+                // blip) cannot burn every attempt in a tight loop. Execution is idempotent by operation id,
+                // so a retry after an effect that did commit completes without a second debit.
                 return true;
             }
         }
