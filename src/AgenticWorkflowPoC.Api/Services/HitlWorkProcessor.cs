@@ -73,12 +73,26 @@ namespace AgenticWorkflowPoC.Api.Services
 
             try
             {
+                // No LLM here: the immutable context is re-evaluated deterministically by the plugin.
                 var outcome = await _transferPlugin.ExecuteApprovedTransferAsync(session.SessionId, command, cancellationToken);
 
-                var finalStatus = outcome.Kind == TransferOutcomeKind.Completed
-                    ? HitlSessionStatus.Completed
-                    : HitlSessionStatus.Failed;
-                await TransitionAsync(session, finalStatus, cancellationToken);
+                if (outcome.Kind == TransferOutcomeKind.Completed)
+                {
+                    await TransitionAsync(session, HitlSessionStatus.Completed, cancellationToken);
+                    return true;
+                }
+
+                // Bounded Re-evaluation failed: the domain changed since approval. Terminal, nothing executed.
+                var reason = $"{outcome.RejectionCode}: {outcome.Message}";
+                if (!await _repository.TryInvalidateAsync(
+                        session.TenantId,
+                        session.SessionId,
+                        reason.Length <= 200 ? reason : reason[..200],
+                        cancellationToken))
+                {
+                    _logger.LogWarning("HITL session {SessionId} could not be invalidated.", session.SessionId);
+                }
+
                 return true;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

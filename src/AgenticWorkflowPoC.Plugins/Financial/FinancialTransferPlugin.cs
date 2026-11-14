@@ -56,23 +56,16 @@ namespace AgenticWorkflowPoC.Plugins.Financial
         {
             var policy = _policyProvider.GetRequiredPolicy(command.TenantId);
             var now = _timeProvider.GetUtcNow();
+            var snapshot = await ReadSnapshotAsync(operationId, command, now, cancellationToken);
 
-            var limitViolation = TransferPolicy.EvaluateTenantLimits(command, policy);
-            if (limitViolation is not null)
-            {
-                return Reject(limitViolation);
-            }
-
-            var snapshot = await _ledgerReader.GetSnapshotAsync(
-                new LedgerQuery(command.TenantId, command.SourceAccountId, command.DestinationAccount, operationId, now),
-                cancellationToken);
-
+            // An operation that already executed is an idempotent replay: never re-judge it.
             if (!snapshot.OperationAlreadyExecuted)
             {
-                var ledgerViolation = TransferPolicy.EvaluateLedger(command, snapshot, policy);
-                if (ledgerViolation is not null)
+                var violation = TransferPolicy.EvaluateTenantLimits(command, policy)
+                    ?? TransferPolicy.EvaluateLedger(command, snapshot, policy);
+                if (violation is not null)
                 {
-                    return Reject(ledgerViolation);
+                    return Reject(violation);
                 }
 
                 if (TransferPolicy.RequiresHumanApproval(command, policy))
@@ -94,16 +87,47 @@ namespace AgenticWorkflowPoC.Plugins.Financial
         }
 
         /// <summary>
-        /// Executes a transfer a human operator has approved. Never re-opens a review.
+        /// Executes a transfer a human operator has approved, after a Bounded Re-evaluation:
+        /// the approval is a hint, not an authorization. Hours may have passed since suspension, so the
+        /// same deterministic rules run again against fresh ledger state and the current tenant policy.
+        /// Bounded: one deterministic pass, no LLM call, and the approval threshold is not re-applied
+        /// (that is exactly what the operator signed off). A failure here means "do not execute".
         /// </summary>
-        public Task<TransferOutcome> ExecuteApprovedTransferAsync(
+        public async Task<TransferOutcome> ExecuteApprovedTransferAsync(
             Guid operationId,
             EnrichedTransferCommand command,
             CancellationToken cancellationToken = default)
         {
             var policy = _policyProvider.GetRequiredPolicy(command.TenantId);
-            return ExecuteAsync(operationId, command, policy, _timeProvider.GetUtcNow(), cancellationToken);
+            var now = _timeProvider.GetUtcNow();
+            var snapshot = await ReadSnapshotAsync(operationId, command, now, cancellationToken);
+
+            if (!snapshot.OperationAlreadyExecuted)
+            {
+                var violation = TransferPolicy.EvaluateTenantLimits(command, policy)
+                    ?? TransferPolicy.EvaluateLedger(command, snapshot, policy);
+                if (violation is not null)
+                {
+                    _logger.LogWarning(
+                        "Approved transfer {OperationId} failed re-evaluation: {Code}.",
+                        operationId,
+                        violation.Code);
+                    return Reject(violation);
+                }
+            }
+
+            // The executor re-checks balance, freeze and daily limit atomically (closes the TOCTOU window).
+            return await ExecuteAsync(operationId, command, policy, now, cancellationToken);
         }
+
+        private Task<LedgerSnapshot> ReadSnapshotAsync(
+            Guid operationId,
+            EnrichedTransferCommand command,
+            DateTimeOffset now,
+            CancellationToken cancellationToken) =>
+            _ledgerReader.GetSnapshotAsync(
+                new LedgerQuery(command.TenantId, command.SourceAccountId, command.DestinationAccount, operationId, now),
+                cancellationToken);
 
         private async Task<TransferOutcome> ExecuteAsync(
             Guid operationId,

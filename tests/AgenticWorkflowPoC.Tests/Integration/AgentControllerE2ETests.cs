@@ -86,6 +86,27 @@ namespace AgenticWorkflowPoC.Tests.Integration
         }
 
         [Fact]
+        public async Task ApprovalAfterAccountFreeze_EndsInvalidatedAndIsVisibleToTheClient()
+        {
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+            var factory = ApiFactory.Create(_factory, scenario);
+            var sessionId = Guid.NewGuid();
+            var user = ApiFactory.CreateClient(factory, ApiFactory.UserKeyA);
+            var admin = ApiFactory.CreateClient(factory, ApiFactory.AdminKeyA);
+
+            var invoke = await user.PostAsJsonAsync("/api/agent/invoke", new { SessionId = sessionId, Prompt = FakeChatClient.HighValueIntent });
+            scenario.Ledger.Freeze(TransferScenario.TenantA, TransferScenario.OperatingAccount);
+            await admin.PostAsJsonAsync($"{invoke.Headers.Location!.AbsolutePath}/resume", new { IsApproved = true });
+
+            await WaitForStatusAsync(scenario, sessionId, HitlSessionStatus.Invalidated, TimeSpan.FromSeconds(5));
+            var view = await user.GetFromJsonAsync<HitlSessionView>(invoke.Headers.Location);
+
+            Assert.Equal("Invalidated", view?.Status);
+            Assert.StartsWith("AccountFrozen", view?.InvalidationReason);
+            Assert.Equal(0, scenario.Ledger.ExecutedCount);
+        }
+
+        [Fact]
         public async Task SessionEndpoints_AreInvisibleAcrossTenants()
         {
             var scenario = new TransferScenario();
