@@ -32,7 +32,7 @@ namespace AgenticWorkflowPoC.Tests.Controllers
             var fake = new FakeAgentService(resume: new ResumeOutcome.Queued(Guid.NewGuid(), "tenant-a"));
             var controller = new TenantSessionsController(fake, new InMemoryHitlSessionRepository(), new FixedTenantAccessor("tenant-a"));
 
-            var res = await controller.Resume("tenant-a", Guid.NewGuid(), new ResumeSessionRequest(true), CancellationToken.None);
+            var res = await controller.Resume("tenant-a", Guid.NewGuid(), new ResumeSessionRequest(IsApproved: true), CancellationToken.None);
 
             Assert.Equal(TenantSessionsController.GetSessionRouteName, Assert.IsType<AcceptedAtRouteResult>(res).RouteName);
         }
@@ -43,7 +43,7 @@ namespace AgenticWorkflowPoC.Tests.Controllers
             var fake = new FakeAgentService(resume: new ResumeOutcome.Queued(Guid.NewGuid(), "tenant-b"));
             var controller = new TenantSessionsController(fake, new InMemoryHitlSessionRepository(), new FixedTenantAccessor("tenant-a"));
 
-            var res = await controller.Resume("tenant-b", Guid.NewGuid(), new ResumeSessionRequest(true), CancellationToken.None);
+            var res = await controller.Resume("tenant-b", Guid.NewGuid(), new ResumeSessionRequest(IsApproved: true), CancellationToken.None);
 
             Assert.IsType<NotFoundResult>(res);
             Assert.False(fake.Called);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using AgenticWorkflowPoC.Api.Development;
@@ -127,6 +128,25 @@ namespace AgenticWorkflowPoC.Tests.Integration
             Assert.Equal(HttpStatusCode.NotFound, ownRoute.StatusCode);
             Assert.Equal(HttpStatusCode.NotFound, crossResume.StatusCode);
             Assert.Equal(HttpStatusCode.NotFound, ownResume.StatusCode);
+            Assert.Equal(HitlSessionStatus.PendingReview, (await scenario.Repository.GetAsync(TransferScenario.TenantA, sessionId))?.Status);
+        }
+
+        [Theory]
+        [InlineData("{}")]
+        [InlineData("{\"approved\":true}")]
+        [InlineData("{\"isApproved\":null}")]
+        public async Task Resume_WithoutExplicitDecision_Returns400AndLeavesSessionPending(string body)
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+            var factory = ApiFactory.Create(_factory, scenario);
+
+            var response = await ApiFactory.CreateClient(factory, ApiFactory.AdminKeyA).PostAsync(
+                $"/api/v1/tenants/{TransferScenario.TenantA}/sessions/{sessionId}/resume",
+                new StringContent(body, System.Text.Encoding.UTF8, "application/json"));
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             Assert.Equal(HitlSessionStatus.PendingReview, (await scenario.Repository.GetAsync(TransferScenario.TenantA, sessionId))?.Status);
         }
 

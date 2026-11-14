@@ -71,7 +71,13 @@ namespace AgenticWorkflowPoC.Api.Controllers
                 return NotFound();
             }
 
-            var outcome = await _agentService.ResumeAsync(sessionId, request.IsApproved, cancellationToken);
+            if (request.IsApproved is not bool isApproved)
+            {
+                ModelState.AddModelError(nameof(request.IsApproved), "An explicit isApproved decision is required.");
+                return ValidationProblem(ModelState);
+            }
+
+            var outcome = await _agentService.ResumeAsync(sessionId, isApproved, cancellationToken);
 
             return outcome switch
             {
