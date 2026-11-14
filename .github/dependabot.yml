@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Microsoft Agent Framework pins a minimum Microsoft.Extensions.AI version (NU1605 on mismatch),
+      # so both families must move together.
+      microsoft-ai:
+        patterns:
+          - "Microsoft.Agents.AI*"
+          - "Microsoft.Extensions.AI*"
+      aspnetcore:
+        patterns:
+          - "Microsoft.AspNetCore.*"
+          - "Microsoft.Extensions.*"
+        exclude-patterns:
+          - "Microsoft.Extensions.AI*"
+      test-tooling:
+        patterns:
+          - "xunit*"
+          - "Microsoft.NET.Test.Sdk"
+          - "coverlet.*"
+          - "Moq"
+          - "Testcontainers*"
+          - "GitHubActionsTestLogger"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
