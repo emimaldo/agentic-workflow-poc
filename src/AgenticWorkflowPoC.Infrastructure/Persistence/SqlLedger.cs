@@ -22,7 +22,10 @@ namespace AgenticWorkflowPoC.Infrastructure.Persistence
         public async Task<LedgerSnapshot> GetSnapshotAsync(LedgerQuery query, CancellationToken cancellationToken = default)
         {
             // Advisory, read-committed snapshot. Final guards run atomically in SqlTransferExecutor.
+            // Isolation is declared explicitly: pooled connections keep the level of their previous user.
             const string sql = """
+                SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
                 SELECT Currency, Balance, IsFrozen
                 FROM dbo.Accounts
                 WHERE TenantId = @TenantId AND AccountId = @SourceAccountId;
@@ -86,11 +89,49 @@ namespace AgenticWorkflowPoC.Infrastructure.Persistence
             TransferExecutionRequest request,
             CancellationToken cancellationToken = default)
         {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            try
+            {
+                return await ExecuteSerializableAsync(connection, request, cancellationToken);
+            }
+            finally
+            {
+                await ResetIsolationLevelAsync(connection);
+            }
+        }
+
+        /// <summary>
+        /// SQL Server keeps a session's isolation level when the connection goes back to the pool,
+        /// so a pooled connection would otherwise leak SERIALIZABLE into unrelated queries
+        /// (e.g. the READPAST work-queue claim, which then fails).
+        /// </summary>
+        private static async Task ResetIsolationLevelAsync(SqlConnection connection)
+        {
+            if (connection.State != ConnectionState.Open)
+            {
+                return;
+            }
+
+            try
+            {
+                await connection.ExecuteAsync("SET TRANSACTION ISOLATION LEVEL READ COMMITTED;");
+            }
+            catch (SqlException)
+            {
+                // The connection is unusable; make sure it is not handed out again with a stale level.
+                SqlConnection.ClearPool(connection);
+            }
+        }
+
+        private static async Task<TransferExecutionStatus> ExecuteSerializableAsync(
+            SqlConnection connection,
+            TransferExecutionRequest request,
+            CancellationToken cancellationToken)
+        {
             var command = request.Command;
             var dayStart = LedgerDay.Start(request.AsOfUtc);
 
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
             await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(
                 IsolationLevel.Serializable,
                 cancellationToken);

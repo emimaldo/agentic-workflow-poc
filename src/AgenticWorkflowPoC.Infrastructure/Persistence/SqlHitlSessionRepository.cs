@@ -169,8 +169,12 @@ namespace AgenticWorkflowPoC.Infrastructure.Persistence
             TimeSpan leaseDuration,
             CancellationToken cancellationToken = default)
         {
+            // READPAST is only valid under READ COMMITTED / REPEATABLE READ; declare it explicitly because
+            // pooled connections keep the isolation level of their previous user.
             const string sql = """
-                ;WITH candidate AS
+                SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
+                WITH candidate AS
                 (
                     SELECT TOP (1) *
                     FROM dbo.HitlSessions WITH (UPDLOCK, READPAST, ROWLOCK)
