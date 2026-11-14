@@ -8,6 +8,8 @@ using AgenticWorkflowPoC.Core.Entities;
 using AgenticWorkflowPoC.Core.Interfaces;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using AgenticWorkflowPoC.Plugins.Financial;
+using System.Collections.Generic;
 
 namespace AgenticWorkflowPoC.Api.Services
 {
@@ -98,13 +100,34 @@ namespace AgenticWorkflowPoC.Api.Services
 
             var normalized = payload with
             {
-                DestinationAccount = NormalizeAccount(payload.DestinationAccount),
+                DestinationAccount = FinancialFormats.NormalizeAccount(payload.DestinationAccount),
                 Currency = payload.Currency.Trim().ToUpperInvariant()
             };
 
-            // 3. Context enrichment (multi-tenant isolation): never taken from the model.
+            // 3. Domain invariants: formats the model cannot be trusted to respect.
+            var invariantErrors = ValidateInvariants(normalized);
+            if (invariantErrors.Count > 0)
+            {
+                return new ExtractionResult<EnrichedTransferCommand> { Errors = invariantErrors };
+            }
+
+            // 4. Grounding: critical values must literally appear in what the user wrote.
+            var groundingErrors = ValidateGrounding(userIntent, normalized);
+            if (groundingErrors.Count > 0)
+            {
+                return new ExtractionResult<EnrichedTransferCommand> { Errors = groundingErrors };
+            }
+
+            // 5. Context enrichment (multi-tenant isolation): never taken from the model.
             var tenantId = _tenantAccessor.GetCurrentTenantId();
             var policy = _policyProvider.GetRequiredPolicy(tenantId);
+
+            // 6. Tenant limits.
+            var limitViolation = TransferPolicy.EvaluateTenantLimits(normalized, policy);
+            if (limitViolation is not null)
+            {
+                return Fail(ExtractionErrorCode.TenantLimitExceeded, limitViolation.Message);
+            }
 
             return ExtractionResult<EnrichedTransferCommand>.Success(new EnrichedTransferCommand
             {
@@ -116,8 +139,55 @@ namespace AgenticWorkflowPoC.Api.Services
             });
         }
 
-        internal static string NormalizeAccount(string account) =>
-            string.Concat(account.Where(c => !char.IsWhiteSpace(c))).ToUpperInvariant();
+        private static List<ExtractionError> ValidateInvariants(TransferRequestPayload payload)
+        {
+            var errors = new List<ExtractionError>();
+
+            if (!FinancialFormats.IsValidIban(payload.DestinationAccount))
+            {
+                errors.Add(new(ExtractionErrorCode.InvalidAccount, "The destination account is not a valid IBAN."));
+            }
+
+            if (!FinancialFormats.TryGetMinorUnits(payload.Currency, out var minorUnits))
+            {
+                errors.Add(new(ExtractionErrorCode.InvalidCurrency, "The currency is not a supported ISO 4217 code."));
+            }
+            else if (!FinancialFormats.HasValidScale(payload.Amount, minorUnits))
+            {
+                errors.Add(new(ExtractionErrorCode.InvalidAmount, $"The amount has more decimals than {payload.Currency} allows."));
+            }
+
+            if (payload.Amount <= 0)
+            {
+                errors.Add(new(ExtractionErrorCode.InvalidAmount, "The amount must be greater than zero."));
+            }
+
+            return errors;
+        }
+
+        private static List<ExtractionError> ValidateGrounding(string userIntent, TransferRequestPayload payload)
+        {
+            var errors = new List<ExtractionError>();
+
+            if (!IntentGrounding.IsAccountGrounded(userIntent, payload.DestinationAccount))
+            {
+                errors.Add(new(ExtractionErrorCode.Ungrounded, "The destination account does not appear in the request."));
+            }
+
+            switch (IntentGrounding.GroundAmount(userIntent, payload.Amount))
+            {
+                case GroundingResult.Ambiguous:
+                    errors.Add(new(
+                        ExtractionErrorCode.AmbiguousAmount,
+                        "The amount is ambiguous (decimal vs. thousands separator). Write it unambiguously, e.g. 12500.00 or 12.500,00."));
+                    break;
+                case GroundingResult.Ungrounded:
+                    errors.Add(new(ExtractionErrorCode.Ungrounded, "The amount does not appear in the request."));
+                    break;
+            }
+
+            return errors;
+        }
 
         /// <summary>
         /// Defense-in-depth for local/open-source models that wrap JSON in Markdown fences.

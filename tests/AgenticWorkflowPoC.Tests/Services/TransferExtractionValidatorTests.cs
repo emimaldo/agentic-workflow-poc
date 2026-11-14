@@ -90,6 +90,105 @@ namespace AgenticWorkflowPoC.Tests.Services
             Assert.True(result.IsValid);
         }
 
+        // ---- Layer 2: domain invariants ------------------------------------------------
+
+        [Theory]
+        [InlineData("DE89370400440532013001", "250.00", "EUR", ExtractionErrorCode.InvalidAccount)]   // bad mod-97 checksum
+        [InlineData("NOT-AN-IBAN", "250.00", "EUR", ExtractionErrorCode.InvalidAccount)]
+        [InlineData("DE89370400440532013000", "0", "EUR", ExtractionErrorCode.InvalidAmount)]
+        [InlineData("DE89370400440532013000", "-250.00", "EUR", ExtractionErrorCode.InvalidAmount)]
+        [InlineData("DE89370400440532013000", "250.001", "EUR", ExtractionErrorCode.InvalidAmount)]   // EUR has 2 minor units
+        [InlineData("DE89370400440532013000", "250.5", "JPY", ExtractionErrorCode.InvalidAmount)]     // JPY has 0 minor units
+        [InlineData("DE89370400440532013000", "250.00", "XYZ", ExtractionErrorCode.InvalidCurrency)]
+        public async Task ExtractAndValidate_InvariantViolations_AreRejected(
+            string account, string amount, string currency, ExtractionErrorCode expected)
+        {
+            var json = $"{{\"destinationAccount\":\"{account}\",\"amount\":{amount},\"currency\":\"{currency}\"}}";
+            var scenario = new TransferScenario(new FakeChatClient(json));
+
+            var result = await scenario.CreateValidator().ExtractAndValidateAsync($"Transfer {amount} {currency} to {account}");
+
+            Assert.False(result.IsValid);
+            Assert.Contains(result.Errors, e => e.Code == expected);
+        }
+
+        // ---- Layer 3: grounding -------------------------------------------------------
+
+        [Fact]
+        public async Task ExtractAndValidate_HallucinatedAccount_IsUngrounded()
+        {
+            // A valid IBAN that the user never wrote.
+            var scenario = new TransferScenario(new FakeChatClient(
+                "{\"destinationAccount\":\"GB29NWBK60161331926819\",\"amount\":250.00,\"currency\":\"EUR\"}"));
+
+            var result = await scenario.CreateValidator().ExtractAndValidateAsync(FakeChatClient.LowValueIntent);
+
+            Assert.Equal(ExtractionErrorCode.Ungrounded, Assert.Single(result.Errors).Code);
+        }
+
+        [Fact]
+        public async Task ExtractAndValidate_HallucinatedAmount_IsUngrounded()
+        {
+            var scenario = new TransferScenario(FakeChatClient.LowValueTransfer());
+
+            var result = await scenario.CreateValidator().ExtractAndValidateAsync(
+                "Transfer two hundred and fifty euros to DE89 3704 0044 0532 0130 00");
+
+            Assert.Equal(ExtractionErrorCode.Ungrounded, Assert.Single(result.Errors).Code);
+        }
+
+        [Theory]
+        [InlineData("Transferí 12.500 EUR a DE89 3704 0044 0532 0130 00")]
+        [InlineData("Transfer 12,500 EUR to DE89 3704 0044 0532 0130 00")]
+        public async Task ExtractAndValidate_AmbiguousSeparator_IsRejectedInsteadOfGuessed(string intent)
+        {
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+
+            var result = await scenario.CreateValidator().ExtractAndValidateAsync(intent);
+
+            Assert.Equal(ExtractionErrorCode.AmbiguousAmount, Assert.Single(result.Errors).Code);
+        }
+
+        [Theory]
+        [InlineData("Transferí 12.500,00 EUR a DE89 3704 0044 0532 0130 00")]
+        [InlineData("Transfer 12,500.00 EUR to DE89 3704 0044 0532 0130 00")]
+        [InlineData("Transfer 12500 EUR to DE89370400440532013000")]
+        [InlineData("Transfer 12 500 EUR to de89 3704 0044 0532 0130 00")]
+        public async Task ExtractAndValidate_UnambiguousAmountFormats_AreGrounded(string intent)
+        {
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+
+            var result = await scenario.CreateValidator().ExtractAndValidateAsync(intent);
+
+            Assert.True(result.IsValid);
+            Assert.Equal(12_500m, result.Data.Amount);
+        }
+
+        // ---- Layer 4: tenant limits -----------------------------------------------------
+
+        [Fact]
+        public async Task ExtractAndValidate_CurrencyNotEnabledForTenant_IsRejected()
+        {
+            var scenario = new TransferScenario(new FakeChatClient(
+                "{\"destinationAccount\":\"DE89370400440532013000\",\"amount\":250.00,\"currency\":\"GBP\"}"));
+
+            var result = await scenario.CreateValidator().ExtractAndValidateAsync(
+                "Transfer 250.00 GBP to DE89 3704 0044 0532 0130 00");
+
+            Assert.Equal(ExtractionErrorCode.TenantLimitExceeded, Assert.Single(result.Errors).Code);
+        }
+
+        [Fact]
+        public async Task ExtractAndValidate_AbovePerTransferLimit_IsRejected()
+        {
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+            scenario.PolicyA.MaxPerTransfer = 5_000m;
+
+            var result = await scenario.CreateValidator().ExtractAndValidateAsync(FakeChatClient.HighValueIntent);
+
+            Assert.Equal(ExtractionErrorCode.TenantLimitExceeded, Assert.Single(result.Errors).Code);
+        }
+
         [Fact]
         public async Task ExtractAndValidate_TenantWithoutPolicy_FailsClosed()
         {
