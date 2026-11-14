@@ -29,6 +29,15 @@ builder.Services
         _ => { });
 builder.Services.AddAuthorization();
 
+// Tenant context (Chapter 2): resolved only from the authenticated principal.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ITenantAccessor, HttpContextTenantAccessor>();
+builder.Services.AddOptions<TenantPolicyOptions>()
+    .Configure<IConfiguration>((options, configuration) =>
+        configuration.GetSection(TenantPolicyOptions.SectionName).Bind(options.Tenants));
+builder.Services.AddSingleton<ITenantPolicyProvider, ConfigurationTenantPolicyProvider>();
+builder.Services.AddSingleton(TimeProvider.System);
+
 // 3. Agent Framework setup (local Ollama by default)
 string modelId = builder.Configuration["Ollama:Model"] ?? "llama3.1";
 string endpoint = builder.Configuration["Ollama:Endpoint"] ?? "http://localhost:11434";
