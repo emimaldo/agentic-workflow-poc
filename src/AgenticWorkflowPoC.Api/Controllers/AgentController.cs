@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Security.Claims;
@@ -26,13 +26,7 @@ namespace AgenticWorkflowPoC.Api.Controllers
         [HttpPost( "invoke" )]
         public async Task<IActionResult> InvokeAgent( [FromBody] AgenticWorkflowPoC.Api.Models.AgentRequest request, CancellationToken cancellationToken )
         {
-            var tenantId = User.FindFirstValue("tenant_id");
-            if (string.IsNullOrWhiteSpace(tenantId))
-            {
-                return Forbid();
-            }
-
-            var response = await _agentService.InvokeAsync(request.SessionId, tenantId, request.Prompt, cancellationToken);
+            var response = await _agentService.InvokeAsync(request.SessionId, request.Prompt, cancellationToken);
 
             if (response.Status == "Suspended")
             {
@@ -51,13 +45,7 @@ namespace AgenticWorkflowPoC.Api.Controllers
         [HttpPost( "resume/{sessionId}" )]
         public async Task<IActionResult> ResumeAgent( Guid sessionId, [FromBody] AgenticWorkflowPoC.Api.Models.ResumeRequest request, CancellationToken cancellationToken )
         {
-            var tenantId = User.FindFirstValue("tenant_id");
-            if (string.IsNullOrWhiteSpace(tenantId))
-            {
-                return Forbid();
-            }
-
-            var response = await _agentService.ResumeAsync(sessionId, tenantId, request.IsApproved, cancellationToken);
+            var response = await _agentService.ResumeAsync(sessionId, request.IsApproved, cancellationToken);
 
             return response.Status switch
             {

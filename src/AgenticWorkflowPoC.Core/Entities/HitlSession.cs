@@ -21,6 +21,4 @@ namespace AgenticWorkflowPoC.Core.Entities
         DateTimeOffset SuspendedAt,
         int ExecutionAttempts = 0,
         DateTimeOffset? ProcessingStartedAt = null);
-
-    public sealed record PendingStaffOverride(string StaffId, DateTimeOffset NewAvailability);
 }

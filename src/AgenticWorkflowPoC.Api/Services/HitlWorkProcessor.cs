@@ -1,7 +1,7 @@
 using System.Text.Json;
 using AgenticWorkflowPoC.Core.Entities;
 using AgenticWorkflowPoC.Core.Interfaces;
-using AgenticWorkflowPoC.Plugins.Operations;
+using AgenticWorkflowPoC.Plugins.Financial;
 
 namespace AgenticWorkflowPoC.Api.Services
 {
@@ -11,23 +11,25 @@ namespace AgenticWorkflowPoC.Api.Services
         private const int MaxAttempts = 3;
 
         private readonly IHitlSessionRepository _repository;
-        private readonly StaffOverridesPlugin _staffOverridesPlugin;
+        private readonly FinancialTransferPlugin _transferPlugin;
+        private readonly TimeProvider _timeProvider;
         private readonly ILogger<HitlWorkProcessor> _logger;
 
         public HitlWorkProcessor(
             IHitlSessionRepository repository,
-            StaffOverridesPlugin staffOverridesPlugin,
+            FinancialTransferPlugin transferPlugin,
+            TimeProvider timeProvider,
             ILogger<HitlWorkProcessor> logger)
         {
             _repository = repository;
-            _staffOverridesPlugin = staffOverridesPlugin;
+            _transferPlugin = transferPlugin;
+            _timeProvider = timeProvider;
             _logger = logger;
         }
 
         public async Task<bool> ProcessNextAsync(CancellationToken cancellationToken = default)
         {
-            var now = DateTimeOffset.UtcNow;
-            var session = await _repository.TryClaimNextApprovedAsync(now, ProcessingLease, cancellationToken);
+            var session = await _repository.TryClaimNextApprovedAsync(_timeProvider.GetUtcNow(), ProcessingLease, cancellationToken);
             if (session is null)
             {
                 return false;
@@ -40,35 +42,30 @@ namespace AgenticWorkflowPoC.Api.Services
                 return true;
             }
 
-            PendingStaffOverride? pendingAction;
+            EnrichedTransferCommand? command;
             try
             {
-                pendingAction = JsonSerializer.Deserialize<PendingStaffOverride>(session.PendingActionPayload);
+                command = JsonSerializer.Deserialize<EnrichedTransferCommand>(session.PendingActionPayload);
             }
             catch (JsonException exception)
             {
-                _logger.LogError(exception, "HITL session {SessionId} has an invalid stored action.", session.SessionId);
+                _logger.LogError(exception, "HITL session {SessionId} has an invalid stored context.", session.SessionId);
                 await TransitionAsync(session, HitlSessionStatus.Failed, cancellationToken);
                 return true;
             }
 
-            if (pendingAction is null || string.IsNullOrWhiteSpace(pendingAction.StaffId))
+            if (command is null)
             {
-                _logger.LogError("HITL session {SessionId} has an empty stored action.", session.SessionId);
+                _logger.LogError("HITL session {SessionId} has an empty stored context.", session.SessionId);
                 await TransitionAsync(session, HitlSessionStatus.Failed, cancellationToken);
                 return true;
             }
 
             try
             {
-                var result = await _staffOverridesPlugin.ExecuteApprovedAvailabilityAsync(
-                    session.SessionId,
-                    session.TenantId,
-                    pendingAction.StaffId,
-                    pendingAction.NewAvailability,
-                    cancellationToken);
+                var outcome = await _transferPlugin.ExecuteApprovedTransferAsync(session.SessionId, command, cancellationToken);
 
-                var finalStatus = result.Outcome == StaffOverrideOutcome.Completed
+                var finalStatus = outcome.Kind == TransferOutcomeKind.Completed
                     ? HitlSessionStatus.Completed
                     : HitlSessionStatus.Failed;
                 await TransitionAsync(session, finalStatus, cancellationToken);

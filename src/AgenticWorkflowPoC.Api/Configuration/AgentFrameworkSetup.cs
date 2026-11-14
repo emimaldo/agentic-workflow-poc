@@ -1,7 +1,8 @@
 using System;
 using AgenticWorkflowPoC.Api.Services;
+using AgenticWorkflowPoC.Core.Entities;
 using AgenticWorkflowPoC.Plugins;
-using AgenticWorkflowPoC.Plugins.Operations;
+using AgenticWorkflowPoC.Plugins.Financial;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,17 +15,17 @@ namespace AgenticWorkflowPoC.Api.Configuration
         public static IServiceCollection AddAgenticWorkflow(this IServiceCollection services, string modelId, string endpoint)
         {
             services.AddScoped<IHitlState, HitlStateService>();
-            services.AddTransient<StaffOverridesPlugin>();
+            services.AddScoped<FinancialTransferPlugin>();
 
             services.AddSingleton<IChatClient>(_ => new OllamaApiClient(new Uri(endpoint), modelId));
             services.AddSingleton<AIAgent>(sp => sp
                 .GetRequiredService<IChatClient>()
                 .AsAIAgent(
                     instructions: AgentDefaults.ExtractionPrompt,
-                    name: "AgenticWorkflowExtractor"));
+                    name: "TransferIntentExtractor"));
 
-            services.AddTransient<IAgentService, AgentService>();
-            services.AddSingleton<IExtractionValidator, ExtractionValidator>();
+            services.AddScoped<IExtractionValidator<EnrichedTransferCommand>, TransferExtractionValidator>();
+            services.AddScoped<IAgentService, AgentService>();
             services.AddScoped<HitlWorkProcessor>();
 
             return services;
