@@ -290,9 +290,44 @@ namespace AgenticWorkflowPoC.Tests.Services
             Assert.True(await processor.ProcessNextAsync());
             scenario.Time.Now += TimeSpan.FromMinutes(3);
             Assert.True(await processor.ProcessNextAsync());
+            Assert.Equal(3, executor.CallCount);
+
+            // The next reclaim settles the outcome against the ledger: nothing moved, so Failed.
+            scenario.Time.Now += TimeSpan.FromMinutes(3);
+            Assert.True(await processor.ProcessNextAsync());
 
             Assert.Equal(3, executor.CallCount);
             Assert.Equal(HitlSessionStatus.Failed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+        }
+
+        [Fact]
+        public async Task ProcessNextAsync_WhenEveryAttemptFailsAfterTheDebitCommitted_EndsCompletedNotFailed()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+            var processor = scenario.CreateProcessor(new CommitsThenThrowsExecutor(scenario.Ledger));
+
+            Assert.True(await processor.ProcessNextAsync());
+            for (var attempt = 2; attempt <= 4; attempt++)
+            {
+                scenario.Time.Now += TimeSpan.FromMinutes(3);
+                Assert.True(await processor.ProcessNextAsync());
+            }
+
+            Assert.Equal(HitlSessionStatus.Completed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.Equal(1, scenario.Ledger.ExecutedCount);
+            Assert.Equal(TransferScenario.OpeningBalance - 12_500m, scenario.Ledger.GetBalance(TenantA, TransferScenario.OperatingAccount));
+        }
+
+        /// <summary>The debit commits, then the call fails (e.g. the connection drops before the reply).</summary>
+        private sealed class CommitsThenThrowsExecutor(ITransferExecutor inner) : ITransferExecutor
+        {
+            public async Task<TransferExecutionStatus> ExecuteAsync(TransferExecutionRequest request, CancellationToken cancellationToken = default)
+            {
+                await inner.ExecuteAsync(request, cancellationToken);
+                throw new InvalidOperationException("Connection lost after commit.");
+            }
         }
 
         [Fact]

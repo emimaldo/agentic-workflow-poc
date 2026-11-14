@@ -120,6 +120,19 @@ namespace AgenticWorkflowPoC.Plugins.Financial
             return await ExecuteAsync(operationId, command, policy, now, cancellationToken);
         }
 
+        /// <summary>
+        /// True when the ledger already holds the transfer for this operation id. A HITL session's
+        /// operation id is its session id, which the router never lets another transfer reuse.
+        /// </summary>
+        public async Task<bool> HasExecutedAsync(
+            Guid operationId,
+            EnrichedTransferCommand command,
+            CancellationToken cancellationToken = default)
+        {
+            var snapshot = await ReadSnapshotAsync(operationId, command, _timeProvider.GetUtcNow(), cancellationToken);
+            return snapshot.OperationAlreadyExecuted;
+        }
+
         private Task<LedgerSnapshot> ReadSnapshotAsync(
             Guid operationId,
             EnrichedTransferCommand command,

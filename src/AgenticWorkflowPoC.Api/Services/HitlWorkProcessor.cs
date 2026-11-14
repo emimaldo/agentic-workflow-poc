@@ -35,13 +35,6 @@ namespace AgenticWorkflowPoC.Api.Services
                 return false;
             }
 
-            if (session.ExecutionAttempts > MaxAttempts)
-            {
-                await TransitionAsync(session, HitlSessionStatus.Failed, cancellationToken);
-                _logger.LogError("HITL session {SessionId} exhausted its processing attempts.", session.SessionId);
-                return true;
-            }
-
             EnrichedTransferCommand? command;
             try
             {
@@ -68,6 +61,12 @@ namespace AgenticWorkflowPoC.Api.Services
                     "HITL session {SessionId} context does not match its tenant; refusing to execute.",
                     session.SessionId);
                 await TransitionAsync(session, HitlSessionStatus.Failed, cancellationToken);
+                return true;
+            }
+
+            if (session.ExecutionAttempts > MaxAttempts)
+            {
+                await FinalizeExhaustedAsync(session, command, cancellationToken);
                 return true;
             }
 
@@ -108,18 +107,48 @@ namespace AgenticWorkflowPoC.Api.Services
                     MaxAttempts,
                     session.SessionId);
 
-                if (session.ExecutionAttempts >= MaxAttempts)
-                {
-                    await TransitionAsync(session, HitlSessionStatus.Failed, cancellationToken);
-                    return true;
-                }
-
                 // Backoff: leave the session in Processing. It is retried only after its lease expires
                 // and the worker's sweep reclaims it, so a transient outage (failover, deadlock, network
                 // blip) cannot burn every attempt in a tight loop. Execution is idempotent by operation id,
                 // so a retry after an effect that did commit completes without a second debit.
+                // After the last attempt, the next reclaim settles the final status against the ledger.
                 return true;
             }
+        }
+
+        /// <summary>
+        /// All attempts are spent. The final status comes from the ledger, never from the error count:
+        /// an attempt may have committed the debit and then failed before recording Completed, and a
+        /// session must never report Failed for money that actually moved.
+        /// </summary>
+        private async Task FinalizeExhaustedAsync(
+            HitlSession session,
+            EnrichedTransferCommand command,
+            CancellationToken cancellationToken)
+        {
+            bool executed;
+            try
+            {
+                executed = await _transferPlugin.HasExecutedAsync(session.SessionId, command, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // Cannot verify the ledger right now: stay in Processing and decide on the next reclaim.
+                _logger.LogError(exception, "Could not verify the ledger for exhausted HITL session {SessionId}.", session.SessionId);
+                return;
+            }
+
+            if (executed)
+            {
+                _logger.LogWarning(
+                    "HITL session {SessionId} exhausted its attempts but the transfer had executed; marking Completed.",
+                    session.SessionId);
+                await TransitionAsync(session, HitlSessionStatus.Completed, cancellationToken);
+                return;
+            }
+
+            _logger.LogError("HITL session {SessionId} exhausted its processing attempts.", session.SessionId);
+            await TransitionAsync(session, HitlSessionStatus.Failed, cancellationToken);
         }
 
         private async Task TransitionAsync(
