@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using AgenticWorkflowPoC.Core.Entities;
 using AgenticWorkflowPoC.Core.Interfaces;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace AgenticWorkflowPoC.Api.Configuration
@@ -15,6 +17,26 @@ namespace AgenticWorkflowPoC.Api.Configuration
         public const string SectionName = "TenantPolicies";
 
         public Dictionary<string, TenantPolicy> Tenants { get; } = new(StringComparer.Ordinal);
+    }
+
+    public static class TenantPolicyServiceCollectionExtensions
+    {
+        /// <summary>
+        /// Binds <c>TenantPolicies</c> and keeps it live: the change-token source makes
+        /// <see cref="IOptionsMonitor{TOptions}"/> rebind when configuration reloads, so Bounded
+        /// Re-evaluation always checks an approved transfer against the tenant's <em>current</em> policy.
+        /// </summary>
+        public static IServiceCollection AddTenantPolicies(this IServiceCollection services, IConfiguration configuration)
+        {
+            var section = configuration.GetSection(TenantPolicyOptions.SectionName);
+
+            services.AddOptions<TenantPolicyOptions>().Configure(options => section.Bind(options.Tenants));
+            services.AddSingleton<IOptionsChangeTokenSource<TenantPolicyOptions>>(
+                new ConfigurationChangeTokenSource<TenantPolicyOptions>(section));
+            services.AddSingleton<ITenantPolicyProvider, ConfigurationTenantPolicyProvider>();
+
+            return services;
+        }
     }
 
     public sealed class ConfigurationTenantPolicyProvider : ITenantPolicyProvider
