@@ -78,7 +78,7 @@ curl -i -X POST http://localhost:5002/api/agent/invoke \
 
 ```http
 HTTP/1.1 202 Accepted
-Location: /api/v1/tenants/tenant-local/sessions/7e0d34ab-41cd-4f87-b6d2-ef1328c17939
+Location: http://localhost:5002/api/v1/tenants/tenant-local/sessions/7e0d34ab-41cd-4f87-b6d2-ef1328c17939
 
 {"sessionId":"7e0d34ab-...","status":"Suspended","message":"Transfer of 12,500.00 EUR exceeds the approval threshold of 10,000.00; manual sign-off required."}
 ```
