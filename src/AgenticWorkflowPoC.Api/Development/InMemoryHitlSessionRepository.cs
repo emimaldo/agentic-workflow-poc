@@ -29,6 +29,69 @@ namespace AgenticWorkflowPoC.Api.Development
             return Task.CompletedTask;
         }
 
+        public Task<bool> TryResolveAsync(
+            string tenantId,
+            Guid sessionId,
+            HitlSessionStatus resolution,
+            string resolvedBy,
+            DateTimeOffset resolvedAt,
+            CancellationToken cancellationToken = default)
+        {
+            if (resolution is not (HitlSessionStatus.Approved or HitlSessionStatus.Rejected))
+            {
+                throw new ArgumentOutOfRangeException(nameof(resolution), "A HITL session can only be approved or rejected.");
+            }
+
+            return CompareAndSetAsync(
+                tenantId,
+                sessionId,
+                HitlSessionStatus.PendingReview,
+                current => current with { Status = resolution, ResolvedBy = resolvedBy, ResolvedAt = resolvedAt },
+                cancellationToken);
+        }
+
+        public Task<bool> TryInvalidateAsync(
+            string tenantId,
+            Guid sessionId,
+            string invalidationReason,
+            CancellationToken cancellationToken = default) =>
+            CompareAndSetAsync(
+                tenantId,
+                sessionId,
+                HitlSessionStatus.Processing,
+                current => current with
+                {
+                    Status = HitlSessionStatus.Invalidated,
+                    ProcessingStartedAt = null,
+                    InvalidationReason = invalidationReason
+                },
+                cancellationToken);
+
+        private Task<bool> CompareAndSetAsync(
+            string tenantId,
+            Guid sessionId,
+            HitlSessionStatus expectedStatus,
+            Func<HitlSession, HitlSession> update,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            while (_sessions.TryGetValue(sessionId, out var current))
+            {
+                if (current.TenantId != tenantId || current.Status != expectedStatus)
+                {
+                    return Task.FromResult(false);
+                }
+
+                if (_sessions.TryUpdate(sessionId, update(current), current))
+                {
+                    return Task.FromResult(true);
+                }
+            }
+
+            return Task.FromResult(false);
+        }
+
         public Task<bool> TryTransitionAsync(
             string tenantId,
             Guid sessionId,

@@ -78,14 +78,14 @@ namespace AgenticWorkflowPoC.Api.Services
                         sessionId,
                         [new RoutingError(outcome.RejectionCode?.ToString() ?? "DomainRejected", outcome.Message)]);
 
-                case TransferOutcomeKind.RequiresApproval when _hitlState.IsSuspended:
-                    // 3. Persist the suspended context BEFORE releasing the HTTP thread with 202.
+                case TransferOutcomeKind.RequiresApproval when _hitlState is { IsSuspended: true, Context: { } context }:
+                    // 3. Persist the immutable suspended context BEFORE releasing the HTTP thread with 202.
                     await _hitlSessionRepository.CreatePendingAsync(
                         new HitlSession(
                             sessionId,
                             command.TenantId,
                             _hitlState.Reason,
-                            JsonSerializer.Serialize(command),
+                            JsonSerializer.Serialize(context, context.GetType()),
                             HitlSessionStatus.PendingReview,
                             _timeProvider.GetUtcNow()),
                         cancellationToken);
@@ -116,11 +116,12 @@ namespace AgenticWorkflowPoC.Api.Services
             // The resume signal is a hint, not an authorization: the state transition is persisted
             // atomically (compare-and-set) and execution happens later, after re-evaluation.
             var resolvedStatus = isApproved ? HitlSessionStatus.Approved : HitlSessionStatus.Rejected;
-            var transitioned = await _hitlSessionRepository.TryTransitionAsync(
+            var transitioned = await _hitlSessionRepository.TryResolveAsync(
                 tenantId,
                 sessionId,
-                HitlSessionStatus.PendingReview,
                 resolvedStatus,
+                _tenantAccessor.GetCurrentSubjectId(),
+                _timeProvider.GetUtcNow(),
                 cancellationToken);
 
             if (!transitioned)

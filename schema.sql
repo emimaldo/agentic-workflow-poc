@@ -18,11 +18,14 @@ CREATE TABLE dbo.HitlSessions (
     SessionId UNIQUEIDENTIFIER PRIMARY KEY,
     TenantId NVARCHAR(100) NOT NULL,
     Reason NVARCHAR(500) NOT NULL,
-    PendingActionPayload NVARCHAR(MAX) NOT NULL,
+    SerializedContext NVARCHAR(MAX) NOT NULL,
     Status NVARCHAR(32) NOT NULL,
     SuspendedAt DATETIMEOFFSET NOT NULL,
     ExecutionAttempts INT NOT NULL CONSTRAINT DF_HitlSessions_ExecutionAttempts DEFAULT 0,
-    ProcessingStartedAt DATETIMEOFFSET NULL
+    ProcessingStartedAt DATETIMEOFFSET NULL,
+    ResolvedBy NVARCHAR(200) NULL,
+    ResolvedAt DATETIMEOFFSET NULL,
+    InvalidationReason NVARCHAR(200) NULL
 );
 GO
 

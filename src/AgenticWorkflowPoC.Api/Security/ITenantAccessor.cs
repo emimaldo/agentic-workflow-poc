@@ -11,6 +11,9 @@ namespace AgenticWorkflowPoC.Api.Security
     public interface ITenantAccessor
     {
         string GetCurrentTenantId();
+
+        /// <summary>Authenticated principal identifier, used for operator audit (ResolvedBy).</summary>
+        string GetCurrentSubjectId();
     }
 
     public sealed class TenantContextUnavailableException : InvalidOperationException
@@ -39,6 +42,14 @@ namespace AgenticWorkflowPoC.Api.Security
             return string.IsNullOrWhiteSpace(tenantId)
                 ? throw new TenantContextUnavailableException()
                 : tenantId;
+        }
+
+        public string GetCurrentSubjectId()
+        {
+            var subject = _httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            return string.IsNullOrWhiteSpace(subject)
+                ? throw new TenantContextUnavailableException()
+                : subject;
         }
     }
 }

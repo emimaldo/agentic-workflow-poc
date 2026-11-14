@@ -85,7 +85,7 @@ namespace AgenticWorkflowPoC.Plugins.Financial
                         policy.HitlThreshold);
 
                     // Out-of-band suspension: mutate request-scoped state instead of throwing.
-                    _hitlState.Suspend(reason);
+                    _hitlState.Suspend(reason, command);
                     return new TransferOutcome(TransferOutcomeKind.RequiresApproval, "Transfer suspended pending human review.");
                 }
             }

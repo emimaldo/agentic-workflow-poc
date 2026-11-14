@@ -45,7 +45,7 @@ namespace AgenticWorkflowPoC.Api.Services
             EnrichedTransferCommand? command;
             try
             {
-                command = JsonSerializer.Deserialize<EnrichedTransferCommand>(session.PendingActionPayload);
+                command = JsonSerializer.Deserialize<EnrichedTransferCommand>(session.SerializedContext);
             }
             catch (JsonException exception)
             {
@@ -57,6 +57,16 @@ namespace AgenticWorkflowPoC.Api.Services
             if (command is null)
             {
                 _logger.LogError("HITL session {SessionId} has an empty stored context.", session.SessionId);
+                await TransitionAsync(session, HitlSessionStatus.Failed, cancellationToken);
+                return true;
+            }
+
+            // Defense in depth: the stored context must belong to the tenant that owns the session row.
+            if (!string.Equals(command.TenantId, session.TenantId, StringComparison.Ordinal))
+            {
+                _logger.LogCritical(
+                    "HITL session {SessionId} context does not match its tenant; refusing to execute.",
+                    session.SessionId);
                 await TransitionAsync(session, HitlSessionStatus.Failed, cancellationToken);
                 return true;
             }

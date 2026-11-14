@@ -18,7 +18,11 @@ namespace AgenticWorkflowPoC.Tests.Support
     {
         public string TenantId { get; set; } = tenantId;
 
+        public string SubjectId { get; set; } = "operator@" + tenantId;
+
         public string GetCurrentTenantId() => TenantId;
+
+        public string GetCurrentSubjectId() => SubjectId;
     }
 
     public sealed class StaticTenantPolicyProvider : ITenantPolicyProvider

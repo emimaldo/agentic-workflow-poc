@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AgenticWorkflowPoC.Api.Development;
@@ -26,7 +27,7 @@ namespace AgenticWorkflowPoC.Tests.Services
             var session = await scenario.Repository.GetAsync(TenantA, sessionId);
             Assert.Equal(HitlSessionStatus.PendingReview, session?.Status);
             Assert.Equal(TenantA, session?.TenantId);
-            Assert.Contains(FakeChatClient.DestinationIban, session?.PendingActionPayload);
+            Assert.Contains(FakeChatClient.DestinationIban, session?.SerializedContext);
             Assert.Equal(0, scenario.Ledger.ExecutedCount);
         }
 
@@ -138,6 +139,52 @@ namespace AgenticWorkflowPoC.Tests.Services
 
             Assert.IsType<ResumeOutcome.NotFound>(response);
             Assert.Equal(HitlSessionStatus.PendingReview, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+        }
+
+        [Fact]
+        public async Task InvokeAsync_PersistsTheValidatedCommandAsImmutableContext()
+        {
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+            var sessionId = Guid.NewGuid();
+
+            await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
+
+            var session = await scenario.Repository.GetAsync(TenantA, sessionId);
+            var context = JsonSerializer.Deserialize<EnrichedTransferCommand>(session!.SerializedContext);
+            Assert.Equal(TransferScenario.Command(12_500m), context);
+            Assert.Equal(context, Assert.IsType<EnrichedTransferCommand>(scenario.Hitl.Context));
+        }
+
+        [Fact]
+        public async Task ResumeAsync_RecordsOperatorAndTimestamp()
+        {
+            var scenario = new TransferScenario();
+            scenario.Tenant.SubjectId = "ops-admin-7";
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.CreatePendingAsync(scenario.PendingSession(sessionId));
+
+            await scenario.CreateAgentService().ResumeAsync(sessionId, true);
+
+            var session = await scenario.Repository.GetAsync(TenantA, sessionId);
+            Assert.Equal("ops-admin-7", session?.ResolvedBy);
+            Assert.Equal(scenario.Time.GetUtcNow(), session?.ResolvedAt);
+        }
+
+        [Fact]
+        public async Task ProcessNextAsync_WhenContextTenantDiffersFromSessionTenant_RefusesToExecute()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            var tampered = scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved) with
+            {
+                SerializedContext = JsonSerializer.Serialize(TransferScenario.Command(12_500m, tenantId: TransferScenario.TenantB))
+            };
+            await scenario.Repository.CreatePendingAsync(tampered);
+
+            Assert.True(await scenario.CreateProcessor().ProcessNextAsync());
+
+            Assert.Equal(HitlSessionStatus.Failed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.Equal(0, scenario.Ledger.ExecutedCount);
         }
 
         [Fact]
