@@ -145,15 +145,17 @@ namespace AgenticWorkflowPoC.Tests.Plugins.Financial
         }
 
         [Fact]
-        public async Task ExecuteTransfer_OperationIdReusedForDifferentAmount_Throws()
+        public async Task ExecuteTransfer_OperationIdReusedForDifferentAmount_IsRejectedWithoutSecondDebit()
         {
             var scenario = new TransferScenario();
             var plugin = scenario.CreatePlugin();
             var operationId = Guid.NewGuid();
             await plugin.ExecuteTransferAsync(operationId, TransferScenario.Command(250m));
 
-            await Assert.ThrowsAsync<InvalidOperationException>(
-                () => plugin.ExecuteTransferAsync(operationId, TransferScenario.Command(300m)));
+            var outcome = await plugin.ExecuteTransferAsync(operationId, TransferScenario.Command(300m));
+
+            AssertRejected(outcome, TransferRejectionCode.OperationIdReused);
+            Assert.Equal(TransferScenario.OpeningBalance - 250m, scenario.Ledger.GetBalance(Tenant, Account));
         }
 
         [Fact]

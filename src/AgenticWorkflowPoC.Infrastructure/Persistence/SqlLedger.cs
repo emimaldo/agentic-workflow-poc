@@ -165,7 +165,8 @@ namespace AgenticWorkflowPoC.Infrastructure.Persistence
             {
                 if (!existing.Matches(command))
                 {
-                    throw new InvalidOperationException("An idempotency key was reused for a different transfer.");
+                    await transaction.RollbackAsync(cancellationToken);
+                    return TransferExecutionStatus.IdempotencyConflict;
                 }
 
                 await transaction.CommitAsync(cancellationToken);

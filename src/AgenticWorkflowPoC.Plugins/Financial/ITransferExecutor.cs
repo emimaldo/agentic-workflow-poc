@@ -16,14 +16,17 @@ namespace AgenticWorkflowPoC.Plugins.Financial
         AccountFrozen,
         CurrencyMismatch,
         InsufficientFunds,
-        DailyLimitExceeded
+        DailyLimitExceeded,
+
+        /// <summary>The operation id was already used for a different transfer; nothing was executed.</summary>
+        IdempotencyConflict
     }
 
     /// <summary>
     /// Debits the source account and records the transfer in a single atomic unit of work.
     /// Idempotent by <see cref="TransferExecutionRequest.OperationId"/>: replaying the same operation
     /// returns <see cref="TransferExecutionStatus.AlreadyExecuted"/>; reusing the key for a different
-    /// payload throws <see cref="InvalidOperationException"/>.
+    /// payload returns <see cref="TransferExecutionStatus.IdempotencyConflict"/> without side effects.
     /// </summary>
     public interface ITransferExecutor
     {

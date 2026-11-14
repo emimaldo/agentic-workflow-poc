@@ -49,7 +49,7 @@ namespace AgenticWorkflowPoC.Tests.Integration
         }
 
         [DockerFact]
-        public async Task Executor_ReusedOperationIdForDifferentAmount_ThrowsAndChangesNothing()
+        public async Task Executor_ReusedOperationIdForDifferentAmount_ReturnsConflictAndChangesNothing()
         {
             var tenant = NewTenant();
             await _sql.SeedAccountAsync(tenant, Account, "EUR", 1_000m);
@@ -57,7 +57,7 @@ namespace AgenticWorkflowPoC.Tests.Integration
             var operationId = Guid.NewGuid();
             await executor.ExecuteAsync(Request(tenant, operationId, 100m));
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() => executor.ExecuteAsync(Request(tenant, operationId, 200m)));
+            Assert.Equal(TransferExecutionStatus.IdempotencyConflict, await executor.ExecuteAsync(Request(tenant, operationId, 200m)));
 
             Assert.Equal(900m, await _sql.GetBalanceAsync(tenant, Account));
         }

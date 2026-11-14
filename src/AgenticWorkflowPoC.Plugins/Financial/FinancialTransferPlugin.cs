@@ -161,6 +161,7 @@ namespace AgenticWorkflowPoC.Plugins.Financial
                 TransferExecutionStatus.CurrencyMismatch => Reject(new(TransferRejectionCode.CurrencyMismatch, "The transfer currency does not match the operating account currency.")),
                 TransferExecutionStatus.InsufficientFunds => Reject(new(TransferRejectionCode.InsufficientFunds, "The operating account has insufficient funds.")),
                 TransferExecutionStatus.DailyLimitExceeded => Reject(new(TransferRejectionCode.DailyLimitExceeded, "The transfer would exceed the tenant daily limit.")),
+                TransferExecutionStatus.IdempotencyConflict => Reject(new(TransferRejectionCode.OperationIdReused, "This session id was already used for a different transfer; start a new session.")),
                 _ => throw new InvalidOperationException($"Unexpected execution status {status}.")
             };
         }

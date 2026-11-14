@@ -84,6 +84,23 @@ namespace AgenticWorkflowPoC.Tests.Services
         }
 
         [Fact]
+        public async Task InvokeAsync_ReusingAnExecutedSessionIdForADifferentTransfer_Returns422NotAnException()
+        {
+            var scenario = new TransferScenario(FakeChatClient.LowValueTransfer());
+            var sessionId = Guid.NewGuid();
+            await scenario.Ledger.ExecuteAsync(new TransferExecutionRequest(
+                sessionId,
+                TransferScenario.Command(300m),
+                scenario.PolicyA.DailyLimit,
+                scenario.Time.GetUtcNow()));
+
+            var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.LowValueIntent);
+
+            Assert.Equal("OperationIdReused", Assert.Single(Assert.IsType<RoutingOutcome.Rejected>(response).Errors).Code);
+            Assert.Equal(1, scenario.Ledger.ExecutedCount);
+        }
+
+        [Fact]
         public async Task InvokeAsync_SameSessionIdInAnotherTenant_SuspendsIndependently()
         {
             var sessionId = Guid.NewGuid();

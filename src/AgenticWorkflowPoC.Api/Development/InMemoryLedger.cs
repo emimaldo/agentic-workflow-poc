@@ -95,7 +95,7 @@ namespace AgenticWorkflowPoC.Api.Development
                         || existing.Amount != command.Amount
                         || existing.Currency != command.Currency)
                     {
-                        throw new InvalidOperationException("An idempotency key was reused for a different transfer.");
+                        return Task.FromResult(TransferExecutionStatus.IdempotencyConflict);
                     }
 
                     return Task.FromResult(TransferExecutionStatus.AlreadyExecuted);

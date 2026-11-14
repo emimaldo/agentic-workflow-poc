@@ -11,7 +11,8 @@ namespace AgenticWorkflowPoC.Plugins.Financial
         CurrencyMismatch,
         BeneficiaryBlocked,
         InsufficientFunds,
-        DailyLimitExceeded
+        DailyLimitExceeded,
+        OperationIdReused
     }
 
     public sealed record PolicyViolation(TransferRejectionCode Code, string Message);
