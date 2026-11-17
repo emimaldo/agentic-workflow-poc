@@ -1,144 +1,371 @@
 using System;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using AgenticWorkflowPoC.Api.Development;
 using AgenticWorkflowPoC.Api.Models;
-using AgenticWorkflowPoC.Api.Services;
 using AgenticWorkflowPoC.Core.Entities;
-using AgenticWorkflowPoC.Plugins;
-using AgenticWorkflowPoC.Plugins.Operations;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
+using AgenticWorkflowPoC.Plugins.Financial;
+using AgenticWorkflowPoC.Tests.Support;
 using Xunit;
 
 namespace AgenticWorkflowPoC.Tests.Services
 {
     public class AgentServiceTests
     {
+        private const string TenantA = TransferScenario.TenantA;
+
         [Fact]
-        public async Task InvokeAsync_WhenModelReturnsConflict_ServiceReturnsSuspended()
+        public async Task InvokeAsync_AboveThreshold_PersistsSuspendedContextAndReturnsSuspended()
         {
-            var hitl = new HitlStateService();
-            var fakeChat = new FakeChatClient(returnConflict: true);
-            var repository = new InMemoryHitlSessionRepository();
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
             var sessionId = Guid.NewGuid();
-            var agentService = CreateAgentService(fakeChat, hitl, repository);
 
-            var resp = await agentService.InvokeAsync(sessionId, "prompt");
+            var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
 
-            Assert.Equal("Suspended", resp.Status);
-            Assert.False(string.IsNullOrWhiteSpace(resp.Message));
-            var session = await repository.GetAsync(sessionId);
+            Assert.IsType<RoutingOutcome.Suspended>(response);
+            var session = await scenario.Repository.GetAsync(TenantA, sessionId);
             Assert.Equal(HitlSessionStatus.PendingReview, session?.Status);
-            Assert.Contains("EMP-REQ-001", session?.PendingActionPayload);
+            Assert.Equal(TenantA, session?.TenantId);
+            Assert.Contains(FakeChatClient.DestinationIban, session?.SerializedContext);
+            Assert.Equal(0, scenario.Ledger.ExecutedCount);
         }
 
         [Fact]
-        public async Task InvokeAsync_WhenModelReturnsOk_ServiceReturnsCompleted()
+        public async Task InvokeAsync_BelowThreshold_Completes()
         {
-            var hitl = new HitlStateService();
-            var fakeChat = new FakeChatClient(returnConflict: false);
-            var agentService = CreateAgentService(fakeChat, hitl, new InMemoryHitlSessionRepository());
+            var scenario = new TransferScenario(FakeChatClient.LowValueTransfer());
 
-            var resp = await agentService.InvokeAsync(Guid.NewGuid(), "prompt");
+            var response = await scenario.CreateAgentService().InvokeAsync(Guid.NewGuid(), FakeChatClient.LowValueIntent);
 
-            Assert.Equal("Completed", resp.Status);
-            Assert.Contains("SUCCESS", resp.Response);
+            Assert.IsType<RoutingOutcome.Completed>(response);
+            Assert.Equal(1, scenario.Ledger.ExecutedCount);
         }
 
         [Fact]
-        public async Task ResumeAsync_WhenApproved_ExecutesPendingActionAndCompletesSession()
+        public async Task InvokeAsync_WhenModelReturnsUnknownField_DoesNotPersistOrExecute()
         {
-            var hitl = new HitlStateService();
-            var fakeChat = new FakeChatClient(returnConflict: false);
-            var repository = new InMemoryHitlSessionRepository();
+            var scenario = new TransferScenario(new FakeChatClient(
+                "{\"destinationAccount\":\"DE89370400440532013000\",\"amount\":250.00,\"currency\":\"EUR\",\"tool\":\"delete\"}"));
             var sessionId = Guid.NewGuid();
-            await repository.CreatePendingAsync(CreatePendingSession(sessionId));
-            var agentService = CreateAgentService(fakeChat, hitl, repository);
 
-            var resp = await agentService.ResumeAsync(sessionId, true);
+            var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.LowValueIntent);
 
-            Assert.Equal("Completed", resp.Status);
-            Assert.Contains("SUCCESS", resp.Response);
-            Assert.Equal(HitlSessionStatus.Completed, (await repository.GetAsync(sessionId))?.Status);
-            Assert.Equal(0, fakeChat.CallCount);
+            Assert.Equal("SchemaViolation", Assert.Single(Assert.IsType<RoutingOutcome.Rejected>(response).Errors).Code);
+            Assert.Null(await scenario.Repository.GetAsync(TenantA, sessionId));
+            Assert.Equal(0, scenario.Ledger.ExecutedCount);
         }
 
         [Fact]
-        public async Task ResumeAsync_WhenRejected_RejectsWithoutCallingModel()
+        public async Task InvokeAsync_DomainRejection_DoesNotPersistOrExecute()
         {
-            var fakeChat = new FakeChatClient(returnConflict: false);
-            var repository = new InMemoryHitlSessionRepository();
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+            scenario.Ledger.SeedAccount(TenantA, TransferScenario.OperatingAccount, "EUR", 100m);
             var sessionId = Guid.NewGuid();
-            await repository.CreatePendingAsync(CreatePendingSession(sessionId));
-            var agentService = CreateAgentService(fakeChat, new HitlStateService(), repository);
 
-            var response = await agentService.ResumeAsync(sessionId, false);
+            var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
 
-            Assert.Equal("Rejected", response.Status);
-            Assert.Equal(HitlSessionStatus.Rejected, (await repository.GetAsync(sessionId))?.Status);
-            Assert.Equal(0, fakeChat.CallCount);
+            Assert.Equal("InsufficientFunds", Assert.Single(Assert.IsType<RoutingOutcome.Rejected>(response).Errors).Code);
+            Assert.Null(await scenario.Repository.GetAsync(TenantA, sessionId));
+            Assert.Equal(0, scenario.Ledger.ExecutedCount);
+        }
+
+        [Fact]
+        public async Task InvokeAsync_WithASessionIdAlreadyUsedByTheTenant_IsRejectedBeforeInference()
+        {
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
+
+            var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
+
+            Assert.Equal("SessionIdAlreadyUsed", Assert.Single(Assert.IsType<RoutingOutcome.Rejected>(response).Errors).Code);
+            Assert.Equal(0, scenario.Chat.CallCount);
+        }
+
+        [Fact]
+        public async Task InvokeAsync_ReusingAnExecutedSessionIdForADifferentTransfer_Returns422NotAnException()
+        {
+            var scenario = new TransferScenario(FakeChatClient.LowValueTransfer());
+            var sessionId = Guid.NewGuid();
+            await scenario.Ledger.ExecuteAsync(new TransferExecutionRequest(
+                sessionId,
+                TransferScenario.Command(300m),
+                scenario.PolicyA.DailyLimit,
+                scenario.Time.GetUtcNow()));
+
+            var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.LowValueIntent);
+
+            Assert.Equal("OperationIdReused", Assert.Single(Assert.IsType<RoutingOutcome.Rejected>(response).Errors).Code);
+            Assert.Equal(1, scenario.Ledger.ExecutedCount);
+        }
+
+        [Fact]
+        public async Task InvokeAsync_SameSessionIdInAnotherTenant_SuspendsIndependently()
+        {
+            var sessionId = Guid.NewGuid();
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, tenantId: TransferScenario.TenantB));
+
+            var response = await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
+
+            Assert.IsType<RoutingOutcome.Suspended>(response);
+            Assert.NotNull(await scenario.Repository.GetAsync(TenantA, sessionId));
+            Assert.NotNull(await scenario.Repository.GetAsync(TransferScenario.TenantB, sessionId));
+        }
+
+        [Fact]
+        public async Task ResumeAsync_WhenApproved_QueuesAndWorkerExecutesWithoutCallingModel()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
+
+            var response = await scenario.CreateAgentService().ResumeAsync(sessionId, true);
+
+            Assert.IsType<ResumeOutcome.Queued>(response);
+            Assert.Equal(HitlSessionStatus.Approved, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.Equal(0, scenario.Ledger.ExecutedCount);
+
+            Assert.True(await scenario.CreateProcessor().ProcessNextAsync());
+
+            Assert.Equal(HitlSessionStatus.Completed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.Equal(TransferScenario.OpeningBalance - 12_500m, scenario.Ledger.GetBalance(TenantA, TransferScenario.OperatingAccount));
+            Assert.Equal(0, scenario.Chat.CallCount);
+        }
+
+        [Fact]
+        public async Task ResumeAsync_WhenRejected_RejectsWithoutCallingModelOrExecuting()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
+
+            var response = await scenario.CreateAgentService().ResumeAsync(sessionId, false);
+
+            Assert.IsType<ResumeOutcome.RejectedByOperator>(response);
+            Assert.Equal(HitlSessionStatus.Rejected, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.False(await scenario.CreateProcessor().ProcessNextAsync());
+            Assert.Equal(0, scenario.Chat.CallCount);
+            Assert.Equal(0, scenario.Ledger.ExecutedCount);
         }
 
         [Fact]
         public async Task ResumeAsync_WhenSessionDoesNotExist_ReturnsNotFound()
         {
-            var agentService = CreateAgentService(
-                new FakeChatClient(returnConflict: false),
-                new HitlStateService(),
-                new InMemoryHitlSessionRepository());
+            var response = await new TransferScenario().CreateAgentService().ResumeAsync(Guid.NewGuid(), true);
 
-            var response = await agentService.ResumeAsync(Guid.NewGuid(), true);
-
-            Assert.Equal("NotFound", response.Status);
+            Assert.IsType<ResumeOutcome.NotFound>(response);
         }
 
         [Fact]
         public async Task ResumeAsync_WhenSessionAlreadyResolved_ReturnsConflict()
         {
-            var repository = new InMemoryHitlSessionRepository();
+            var scenario = new TransferScenario();
             var sessionId = Guid.NewGuid();
-            await repository.CreatePendingAsync(CreatePendingSession(sessionId));
-            var agentService = CreateAgentService(
-                new FakeChatClient(returnConflict: false),
-                new HitlStateService(),
-                repository);
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
+            var service = scenario.CreateAgentService();
 
-            await agentService.ResumeAsync(sessionId, false);
-            var secondResponse = await agentService.ResumeAsync(sessionId, true);
+            await service.ResumeAsync(sessionId, false);
+            var secondResponse = await service.ResumeAsync(sessionId, true);
 
-            Assert.Equal("Conflict", secondResponse.Status);
+            Assert.Equal(HitlSessionStatus.Rejected, Assert.IsType<ResumeOutcome.AlreadyResolved>(secondResponse).CurrentStatus);
         }
 
-        private static AgentService CreateAgentService(
-            FakeChatClient fakeChat,
-            IHitlState hitl,
-            InMemoryHitlSessionRepository repository)
+        [Fact]
+        public async Task ResumeAsync_WhenCalledFromAnotherTenant_ReturnsNotFound()
         {
-            var plugin = new StaffOverridesPlugin(NullLogger<StaffOverridesPlugin>.Instance, hitl);
-            var agent = fakeChat.AsAIAgent(instructions: "Extract staffId and date as JSON.");
-            return new AgentService(
-                agent,
-                hitl,
-                NullLogger<AgentService>.Instance,
-                plugin,
-                new ExtractionValidator(),
-                repository);
+            var scenario = new TransferScenario(tenantId: TransferScenario.TenantB);
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, tenantId: TenantA));
+
+            var response = await scenario.CreateAgentService().ResumeAsync(sessionId, true);
+
+            Assert.IsType<ResumeOutcome.NotFound>(response);
+            Assert.Equal(HitlSessionStatus.PendingReview, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
         }
 
-        private static HitlSession CreatePendingSession(Guid sessionId)
+        [Fact]
+        public async Task InvokeAsync_PersistsTheValidatedCommandAsImmutableContext()
         {
-            var payload = JsonSerializer.Serialize(new PendingStaffOverride(
-                "EMP-REQ-001",
-                DateTimeOffset.Parse("2026-09-01T09:00:00Z")));
+            var scenario = new TransferScenario(FakeChatClient.HighValueTransfer());
+            var sessionId = Guid.NewGuid();
 
-            return new HitlSession(
+            await scenario.CreateAgentService().InvokeAsync(sessionId, FakeChatClient.HighValueIntent);
+
+            var session = await scenario.Repository.GetAsync(TenantA, sessionId);
+            var context = JsonSerializer.Deserialize<EnrichedTransferCommand>(session!.SerializedContext);
+            Assert.Equal(TransferScenario.Command(12_500m), context);
+            Assert.Equal(context, Assert.IsType<EnrichedTransferCommand>(scenario.Hitl.Context));
+        }
+
+        [Fact]
+        public async Task ResumeAsync_RecordsOperatorAndTimestamp()
+        {
+            var scenario = new TransferScenario();
+            scenario.Tenant.SubjectId = "ops-admin-7";
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId));
+
+            await scenario.CreateAgentService().ResumeAsync(sessionId, true);
+
+            var session = await scenario.Repository.GetAsync(TenantA, sessionId);
+            Assert.Equal("ops-admin-7", session?.ResolvedBy);
+            Assert.Equal(scenario.Time.GetUtcNow(), session?.ResolvedAt);
+        }
+
+        [Fact]
+        public async Task ProcessNextAsync_WhenContextTenantDiffersFromSessionTenant_RefusesToExecute()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            var tampered = scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved) with
+            {
+                SerializedContext = JsonSerializer.Serialize(TransferScenario.Command(12_500m, tenantId: TransferScenario.TenantB))
+            };
+            await scenario.Repository.TryCreatePendingAsync(tampered);
+
+            Assert.True(await scenario.CreateProcessor().ProcessNextAsync());
+
+            Assert.Equal(HitlSessionStatus.Failed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.Equal(0, scenario.Ledger.ExecutedCount);
+        }
+
+        [Fact]
+        public async Task ProcessNextAsync_WhenLeaseExpiresAfterEffect_ReclaimsWorkIdempotently()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+
+            // A previous worker claimed the session, debited the account, and crashed before completing it.
+            var staleClaim = await scenario.Repository.TryClaimNextApprovedAsync(
+                scenario.Time.GetUtcNow().AddMinutes(-3),
+                TimeSpan.FromMinutes(2));
+            Assert.Equal(HitlSessionStatus.Processing, staleClaim?.Status);
+            await scenario.Ledger.ExecuteAsync(new TransferExecutionRequest(
                 sessionId,
-                "Requires human review.",
-                payload,
-                HitlSessionStatus.PendingReview,
-                DateTimeOffset.UtcNow);
+                TransferScenario.Command(12_500m),
+                scenario.PolicyA.DailyLimit,
+                scenario.Time.GetUtcNow()));
+
+            Assert.True(await scenario.CreateProcessor().ProcessNextAsync());
+
+            Assert.Equal(HitlSessionStatus.Completed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.Equal(1, scenario.Ledger.ExecutedCount);
+            Assert.Equal(TransferScenario.OpeningBalance - 12_500m, scenario.Ledger.GetBalance(TenantA, TransferScenario.OperatingAccount));
+        }
+
+        [Fact]
+        public async Task TryClaimNextApprovedAsync_ConcurrentWorkersOnlyClaimOneSession()
+        {
+            var scenario = new TransferScenario();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(Guid.NewGuid(), status: HitlSessionStatus.Approved));
+
+            var now = scenario.Time.GetUtcNow();
+            var claims = await Task.WhenAll(
+                scenario.Repository.TryClaimNextApprovedAsync(now, TimeSpan.FromMinutes(2)),
+                scenario.Repository.TryClaimNextApprovedAsync(now, TimeSpan.FromMinutes(2)));
+
+            Assert.Single(claims, claim => claim is not null);
+        }
+
+        [Fact]
+        public async Task ProcessNextAsync_WhenExecutionKeepsFailing_StopsAfterThreeAttempts()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+            var executor = new FailingTransferExecutor();
+            var processor = scenario.CreateProcessor(executor);
+
+            // Attempt 1 fails: no hot retry while the processing lease is still active.
+            Assert.True(await processor.ProcessNextAsync());
+            Assert.False(await processor.ProcessNextAsync());
+            Assert.Equal(1, executor.CallCount);
+            Assert.Equal(HitlSessionStatus.Processing, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+
+            // Each retry happens only after the lease expires (backoff), up to three attempts.
+            scenario.Time.Now += TimeSpan.FromMinutes(3);
+            Assert.True(await processor.ProcessNextAsync());
+            scenario.Time.Now += TimeSpan.FromMinutes(3);
+            Assert.True(await processor.ProcessNextAsync());
+            Assert.Equal(3, executor.CallCount);
+
+            // The next reclaim settles the outcome against the ledger: nothing moved, so Failed.
+            scenario.Time.Now += TimeSpan.FromMinutes(3);
+            Assert.True(await processor.ProcessNextAsync());
+
+            Assert.Equal(3, executor.CallCount);
+            Assert.Equal(HitlSessionStatus.Failed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+        }
+
+        [Fact]
+        public async Task ProcessNextAsync_WhenEveryAttemptFailsAfterTheDebitCommitted_EndsCompletedNotFailed()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+            var processor = scenario.CreateProcessor(new CommitsThenThrowsExecutor(scenario.Ledger));
+
+            Assert.True(await processor.ProcessNextAsync());
+            for (var attempt = 2; attempt <= 4; attempt++)
+            {
+                scenario.Time.Now += TimeSpan.FromMinutes(3);
+                Assert.True(await processor.ProcessNextAsync());
+            }
+
+            Assert.Equal(HitlSessionStatus.Completed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.Equal(1, scenario.Ledger.ExecutedCount);
+            Assert.Equal(TransferScenario.OpeningBalance - 12_500m, scenario.Ledger.GetBalance(TenantA, TransferScenario.OperatingAccount));
+        }
+
+        /// <summary>The debit commits, then the call fails (e.g. the connection drops before the reply).</summary>
+        private sealed class CommitsThenThrowsExecutor(ITransferExecutor inner) : ITransferExecutor
+        {
+            public async Task<TransferExecutionStatus> ExecuteAsync(TransferExecutionRequest request, CancellationToken cancellationToken = default)
+            {
+                await inner.ExecuteAsync(request, cancellationToken);
+                throw new InvalidOperationException("Connection lost after commit.");
+            }
+        }
+
+        [Fact]
+        public async Task ProcessNextAsync_WhenTransientFailureClears_RetrySucceedsAfterBackoff()
+        {
+            var scenario = new TransferScenario();
+            var sessionId = Guid.NewGuid();
+            await scenario.Repository.TryCreatePendingAsync(scenario.PendingSession(sessionId, status: HitlSessionStatus.Approved));
+            var flaky = new FlakyTransferExecutor(scenario.Ledger, failures: 1);
+            var processor = scenario.CreateProcessor(flaky);
+
+            Assert.True(await processor.ProcessNextAsync());
+            scenario.Time.Now += TimeSpan.FromMinutes(3);
+            Assert.True(await processor.ProcessNextAsync());
+
+            Assert.Equal(HitlSessionStatus.Completed, (await scenario.Repository.GetAsync(TenantA, sessionId))?.Status);
+            Assert.Equal(1, scenario.Ledger.ExecutedCount);
+        }
+
+        private sealed class FlakyTransferExecutor(ITransferExecutor inner, int failures) : ITransferExecutor
+        {
+            private int _remainingFailures = failures;
+
+            public Task<TransferExecutionStatus> ExecuteAsync(TransferExecutionRequest request, CancellationToken cancellationToken = default) =>
+                _remainingFailures-- > 0
+                    ? throw new InvalidOperationException("Simulated transient SQL failure.")
+                    : inner.ExecuteAsync(request, cancellationToken);
+        }
+
+        private sealed class FailingTransferExecutor : ITransferExecutor
+        {
+            public int CallCount { get; private set; }
+
+            public Task<TransferExecutionStatus> ExecuteAsync(TransferExecutionRequest request, CancellationToken cancellationToken = default)
+            {
+                CallCount++;
+                throw new InvalidOperationException("Simulated execution failure.");
+            }
         }
     }
 }

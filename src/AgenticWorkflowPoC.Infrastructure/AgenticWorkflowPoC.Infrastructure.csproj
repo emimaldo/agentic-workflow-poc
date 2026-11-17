@@ -2,12 +2,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AgenticWorkflowPoC.Core\AgenticWorkflowPoC.Core.csproj" />
+    <ProjectReference Include="..\AgenticWorkflowPoC.Plugins\AgenticWorkflowPoC.Plugins.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.79" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
   </ItemGroup>
 
   <PropertyGroup>
