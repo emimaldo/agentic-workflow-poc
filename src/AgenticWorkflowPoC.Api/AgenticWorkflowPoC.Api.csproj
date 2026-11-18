@@ -11,7 +11,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="10.0.15" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.28.0" />
-    <PackageReference Include="OllamaSharp" Version="5.5.0" />
+    <PackageReference Include="OllamaSharp" Version="5.5.2" />
   </ItemGroup>
 
   <ItemGroup>
