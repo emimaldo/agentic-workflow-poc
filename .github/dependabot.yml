@@ -5,6 +5,18 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # The book and this repository target .NET 10 LTS: stay on the 10.x servicing line and never
+      # pull a .NET 11-wave package (11.0.x) into net10.0 projects.
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "System.*"
+        update-types: ["version-update:semver-major"]
+      # Agent Framework majors are a manuscript decision, not a routine bump.
+      - dependency-name: "Microsoft.Agents.AI*"
+        update-types: ["version-update:semver-major"]
     groups:
       # Microsoft Agent Framework pins a minimum Microsoft.Extensions.AI version (NU1605 on mismatch),
       # so both families must move together.
