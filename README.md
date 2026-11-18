@@ -105,10 +105,53 @@ if re-evaluation fails). A hallucinated field, an ungrounded IBAN/amount, or ins
 SQL Server (durable mode)
 -------------------------
 - Fresh database: run `schema.sql`, then `scripts/seed-dev.sql` for dev data.
-- Upgrading an existing database: apply `scripts/002-…`, `scripts/003-fintech-ledger.sql` (creates the ledger, drops the
+- Upgrading an existing database: apply `scripts/001-…` (if `dbo.HitlSessions` is missing), `scripts/002-…`,
+  `scripts/003-fintech-ledger.sql` (creates the ledger, drops the
   former staff demo table), `scripts/004-hitl-serialized-context.sql` and `scripts/005-hitl-tenant-scoped-key.sql`
   (HITL key becomes `(TenantId, SessionId)`), in order. All are idempotent.
 - Configure `ConnectionStrings:AgenticDatabase`, `TenantPolicies:{tenantId}:*` and the API keys outside source control.
+
+Debugging locally (Linux, macOS, Windows)
+-----------------------------------------
+1. Copy the development settings template (the copy is gitignored) and replace the API key and SQL password:
+
+   ```bash
+   cp src/AgenticWorkflowPoC.Api/appsettings.Development.example.json src/AgenticWorkflowPoC.Api/appsettings.Development.json
+   ```
+
+   ```powershell
+   Copy-Item src/AgenticWorkflowPoC.Api/appsettings.Development.example.json src/AgenticWorkflowPoC.Api/appsettings.Development.json
+   ```
+
+2. Start the API under the debugger (F5 in Visual Studio, Rider or VS Code with C# Dev Kit), picking a launch profile:
+
+   | Profile | URL | Model | HITL store and ledger |
+   |---|---|---|---|
+   | `fake` | `http://localhost:5002` | `FakeChatClient` (zero tokens) | In memory, seeded from `DevLedger` |
+   | `http` | `http://localhost:5270` | Ollama (`Ollama:Model`) | SQL Server (`docker compose up -d`, then the scripts above) |
+
+   Without an IDE: `dotnet run --project src/AgenticWorkflowPoC.Api --launch-profile fake`.
+
+3. Drive the flow with the helper, which reads the API key from `appsettings.Development.json`:
+
+   ```bash
+   scripts/try-transfer.sh invoke "Transfer 12500 EUR to DE89 3704 0044 0532 0130 00"
+   scripts/try-transfer.sh get <sessionId>
+   scripts/try-transfer.sh resume <sessionId> true
+   ```
+
+   ```powershell
+   ./scripts/try-transfer.ps1 invoke "Transfer 12500 EUR to DE89 3704 0044 0532 0130 00"
+   ./scripts/try-transfer.ps1 get <sessionId>
+   ./scripts/try-transfer.ps1 resume <sessionId> true
+   ```
+
+   The PowerShell helper needs PowerShell 7+. For the `http` profile set `BASE_URL=http://localhost:5270`
+   (`$env:BASE_URL = 'http://localhost:5270'` in PowerShell). Useful breakpoints: `AgentService.InvokeAsync`,
+   `TransferExtractionValidator`, `FinancialTransferPlugin.ExecuteTransferAsync` and `HitlWorkProcessor`.
+
+In the `Development` environment the ASP.NET Core error page echoes request headers, including `X-Api-Key`: redact it
+before pasting logs into an issue.
 
 Configuration reference
 -----------------------
